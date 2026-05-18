@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn bucket_name_rejects_invalid_length() {
         assert!(BucketName::new("ab").is_err());
-        assert!(BucketName::new(&"a".repeat(64)).is_err());
+        assert!(BucketName::new("a".repeat(64)).is_err());
     }
 
     #[test]

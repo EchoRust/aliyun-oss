@@ -149,12 +149,12 @@ mod tests {
 
     #[test]
     fn object_key_rejects_over_max_length() {
-        assert!(ObjectKey::new(&"a".repeat(1025)).is_err());
+        assert!(ObjectKey::new("a".repeat(1025)).is_err());
     }
 
     #[test]
     fn object_key_accepts_exact_max_length() {
-        assert!(ObjectKey::new(&"a".repeat(1024)).is_ok());
+        assert!(ObjectKey::new("a".repeat(1024)).is_ok());
     }
 
     #[test]
