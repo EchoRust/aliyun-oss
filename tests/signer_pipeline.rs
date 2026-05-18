@@ -1,7 +1,5 @@
-use aliyun_oss::config::credentials::Credentials;
 use aliyun_oss::signer::v4::{SigningRequest, V4Signer};
-use aliyun_oss::signer::{SignVersion, Signer, SigningRequest as UnifiedRequest};
-use aliyun_oss::types::region::Region;
+use aliyun_oss::signer::{SignVersion, SigningRequest as UnifiedRequest};
 
 mod common;
 
