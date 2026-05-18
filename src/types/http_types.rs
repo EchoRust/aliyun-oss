@@ -39,10 +39,10 @@ impl FromStr for HttpMethod {
             "OPTIONS" => Ok(Self::Options),
             other => Err(OssError {
                 kind: OssErrorKind::ValidationError,
-                context: crate::error::ErrorContext {
+                context: Box::new(crate::error::ErrorContext {
                     operation: Some(format!("parse HttpMethod from '{}'", other)),
                     ..Default::default()
-                },
+                }),
                 source: None,
             }),
         }

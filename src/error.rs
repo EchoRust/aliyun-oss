@@ -41,7 +41,7 @@ fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OssErrorKind {
-    ServiceError(OssServiceError),
+    ServiceError(Box<OssServiceError>),
     ConfigError,
     SigningError,
     TransportError,
@@ -115,15 +115,15 @@ impl fmt::Display for ErrorContext {
 #[derive(Debug)]
 pub struct OssError {
     pub kind: OssErrorKind,
-    pub context: ErrorContext,
+    pub context: Box<ErrorContext>,
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl OssError {
     pub fn service(err: OssServiceError) -> Self {
         Self {
-            kind: OssErrorKind::ServiceError(err),
-            context: ErrorContext::default(),
+            kind: OssErrorKind::ServiceError(Box::new(err)),
+            context: Box::new(ErrorContext::default()),
             source: None,
         }
     }
@@ -135,13 +135,13 @@ impl OssError {
     ) -> Self {
         Self {
             kind: OssErrorKind::ValidationError,
-            context: ErrorContext {
+            context: Box::new(ErrorContext {
                 operation: Some(op.into()),
                 bucket: Some(bucket.into()),
                 object_key: Some(key.into()),
                 request_id: None,
                 endpoint: None,
-            },
+            }),
             source: None,
         }
     }
@@ -149,7 +149,7 @@ impl OssError {
     pub fn transport(source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self {
             kind: OssErrorKind::TransportError,
-            context: ErrorContext::default(),
+            context: Box::new(ErrorContext::default()),
             source: Some(Box::new(source)),
         }
     }

@@ -444,10 +444,10 @@ impl FromStr for Region {
 
             other => Err(OssError {
                 kind: OssErrorKind::ValidationError,
-                context: ErrorContext {
+                context: Box::new(ErrorContext {
                     operation: Some(format!("parse Region from '{}'", other)),
                     ..Default::default()
-                },
+                }),
                 source: None,
             }),
         }

@@ -14,3 +14,7 @@ repository = "https://github.com/EchoRust/aliyun-oss"
 thiserror = "2"
 http = "1"
 bytes = "1"
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
