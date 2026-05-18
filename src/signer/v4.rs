@@ -370,9 +370,7 @@ mod tests {
         assert!(auth.contains("AdditionalHeaders=content-disposition;content-length,"));
         assert!(auth.contains("Signature="));
 
-        let expected = format!(
-            "OSS4-HMAC-SHA256 Credential=LTAI5tGL4ap4q4aUSTtxMGVD/20250411/cn-hangzhou/oss/aliyun_v4_request,AdditionalHeaders=content-disposition;content-length,Signature=d3694c2dfc5371ee6acd35e88c4871ac95a7ba01d3a2f476768fe61218590097"
-        );
+        let expected = "OSS4-HMAC-SHA256 Credential=LTAI5tGL4ap4q4aUSTtxMGVD/20250411/cn-hangzhou/oss/aliyun_v4_request,AdditionalHeaders=content-disposition;content-length,Signature=d3694c2dfc5371ee6acd35e88c4871ac95a7ba01d3a2f476768fe61218590097".to_string();
         assert_eq!(auth, expected);
     }
 
@@ -455,9 +453,9 @@ mod tests {
         let canonical = signer.build_canonical_query_string(&request);
 
         let parts: Vec<&str> = canonical.split('&').collect();
-        assert_eq!(parts[0].starts_with("marker="), true);
-        assert_eq!(parts[1].starts_with("max-keys="), true);
-        assert_eq!(parts[2].starts_with("prefix="), true);
+        assert!(parts[0].starts_with("marker="));
+        assert!(parts[1].starts_with("max-keys="));
+        assert!(parts[2].starts_with("prefix="));
     }
 
     #[test]
@@ -484,8 +482,8 @@ mod tests {
             std::env::var("OSS_TEST_ACCESS_KEY_ID").expect("Set OSS_TEST_ACCESS_KEY_ID env var");
         let access_key_secret = std::env::var("OSS_TEST_ACCESS_KEY_SECRET")
             .expect("Set OSS_TEST_ACCESS_KEY_SECRET env var");
-        let region = std::env::var("OSS_TEST_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
-        let bucket = std::env::var("OSS_TEST_BUCKET").unwrap_or_else(|_| "oss-sdk-test".into());
+        let region = std::env::var("OSS_TEST_REGION").unwrap_or("cn-hangzhou".into());
+        let bucket = std::env::var("OSS_TEST_BUCKET").unwrap_or("oss-sdk-test".into());
 
         let credentials = Credentials::builder()
             .access_key_id(access_key_id.as_str())
