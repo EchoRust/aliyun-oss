@@ -13,3 +13,4 @@ repository = "https://github.com/EchoRust/aliyun-oss"
 [dependencies]
 thiserror = "2"
 http = "1"
+bytes = "1"
