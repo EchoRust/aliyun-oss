@@ -132,6 +132,75 @@ impl V1Signer {
     }
 }
 
+impl crate::signer::Signer for V1Signer {
+    fn sign(
+        &self,
+        request: &mut crate::signer::SigningRequest,
+        credentials: &Credentials,
+    ) -> Result<()> {
+        let content_md5 = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == "content-md5")
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("");
+
+        let content_type = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == "content-type")
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("");
+
+        let oss_headers: Vec<(&str, &str)> = request
+            .headers
+            .iter()
+            .filter(|(k, _)| k.to_lowercase().starts_with("x-oss-"))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let query_refs: Vec<(&str, &str)> = request
+            .query_params
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let (bucket, object_key) = parse_bucket_key(&request.uri);
+
+        let v1_request = V1SigningRequest {
+            verb: &request.method,
+            content_md5,
+            content_type,
+            date: &request.timestamp,
+            bucket: &bucket,
+            object_key: &object_key,
+            oss_headers: &oss_headers,
+            query_params: &query_refs,
+        };
+
+        let auth = self.sign(&v1_request, credentials)?;
+
+        request.headers.push(("Authorization".into(), auth));
+
+        Ok(())
+    }
+}
+
+fn parse_bucket_key(uri: &str) -> (String, String) {
+    let path = uri.trim_start_matches('/');
+    if path.is_empty() {
+        return (String::new(), String::new());
+    }
+    if let Some(slash_pos) = path.find('/') {
+        (
+            path[..slash_pos].to_string(),
+            path[slash_pos + 1..].to_string(),
+        )
+    } else {
+        (path.to_string(), String::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

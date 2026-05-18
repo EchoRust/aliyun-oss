@@ -180,6 +180,47 @@ impl V4Signer {
     }
 }
 
+impl crate::signer::Signer for V4Signer {
+    fn sign(
+        &self,
+        request: &mut crate::signer::SigningRequest,
+        credentials: &Credentials,
+    ) -> Result<()> {
+        let refs: Vec<(&str, &str)> = request
+            .headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let query_refs: Vec<(&str, &str)> = request
+            .query_params
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let v4_request = SigningRequest {
+            method: &request.method,
+            uri: &request.uri,
+            region: &request.region,
+            query_params: query_refs,
+            headers: refs,
+            body_hash: "UNSIGNED-PAYLOAD",
+            timestamp: &request.timestamp,
+        };
+
+        let auth = self.sign(&v4_request, credentials)?;
+
+        request.headers.push(("Authorization".into(), auth));
+        request
+            .headers
+            .push(("x-oss-content-sha256".into(), UNSIGNED_PAYLOAD.into()));
+        request
+            .headers
+            .push(("x-oss-date".into(), request.timestamp.clone()));
+
+        Ok(())
+    }
+}
+
 pub struct SigningRequest<'a> {
     pub method: &'a str,
     pub uri: &'a str,
