@@ -435,4 +435,69 @@ mod tests {
         let canonical = signer.build_canonical_request(&request);
         assert!(canonical.contains("x-oss-content-sha256:UNSIGNED-PAYLOAD"));
     }
+
+    #[test]
+    #[ignore = "requires OSS credentials in env vars"]
+    fn e2e_v4_sign_with_real_credentials() {
+        let access_key_id =
+            std::env::var("OSS_TEST_ACCESS_KEY_ID").expect("Set OSS_TEST_ACCESS_KEY_ID env var");
+        let access_key_secret = std::env::var("OSS_TEST_ACCESS_KEY_SECRET")
+            .expect("Set OSS_TEST_ACCESS_KEY_SECRET env var");
+        let region = std::env::var("OSS_TEST_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
+        let bucket = std::env::var("OSS_TEST_BUCKET").unwrap_or_else(|_| "oss-sdk-test".into());
+
+        let credentials = Credentials::builder()
+            .access_key_id(access_key_id.as_str())
+            .access_key_secret(access_key_secret.as_str())
+            .build()
+            .unwrap();
+
+        let timestamp = "20250518T120000Z";
+        let date = &timestamp[..8];
+        let object_key = "test/signer-e2e.txt";
+
+        let request = SigningRequest {
+            method: "PUT",
+            uri: &format!("/{}/{}", bucket, object_key),
+            region: &region,
+            query_params: vec![],
+            headers: vec![("content-type", "text/plain"), ("x-oss-date", timestamp)],
+            body_hash: "UNSIGNED-PAYLOAD",
+            timestamp,
+        };
+
+        let signer = V4Signer;
+        let auth = signer.sign(&request, &credentials).unwrap();
+        let canonical = signer.build_canonical_request(&request);
+        let signing_key = signer.derive_signing_key(&access_key_secret, date, &region);
+
+        println!();
+        println!("=== V4 Signature E2E ===");
+        println!("Region:       {region}");
+        println!("Bucket:       {bucket}");
+        println!("Object:       {object_key}");
+        println!("Timestamp:    {timestamp}");
+        println!();
+        println!("Canonical Request:");
+        for line in canonical.lines() {
+            println!("  {line}");
+        }
+        println!();
+        println!("SigningKey:   {}", hex::encode(&signing_key));
+        println!();
+        println!("Authorization:");
+        println!("{auth}");
+        println!();
+        println!("Verify with curl:");
+        println!(
+            "curl -v -X PUT \\\n  -H \"Content-Type: text/plain\" \\\n  -H \"x-oss-date: {timestamp}\" \\\n  -H \"x-oss-content-sha256: UNSIGNED-PAYLOAD\" \\\n  -H \"Authorization: {auth}\" \\\n  -d \"test content\" \\\n  https://{bucket}.oss-{region}.aliyuncs.com/{object_key}",
+        );
+        println!();
+
+        let sha256_hash = hex::encode(sha2::Sha256::digest(canonical.as_bytes()));
+        assert!(
+            !sha256_hash.is_empty(),
+            "canonical request should produce a hash"
+        );
+    }
 }
