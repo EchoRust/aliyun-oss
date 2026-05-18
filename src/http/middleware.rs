@@ -204,7 +204,6 @@ impl RetryConfig {
 mod tests {
     use super::*;
     use crate::http::client::ReqwestHttpClient;
-    use http::StatusCode;
 
     #[test]
     fn retry_config_default_values() {
