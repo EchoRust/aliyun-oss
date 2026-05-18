@@ -9,11 +9,11 @@ use crate::types::region::Region;
 
 #[allow(dead_code)]
 pub(crate) struct OSSClientInner {
-    http: Arc<dyn HttpClient>,
-    credentials: Arc<dyn CredentialsProvider>,
-    signer: Arc<dyn Signer>,
-    region: Region,
-    endpoint: String,
+    pub(crate) http: Arc<dyn HttpClient>,
+    pub(crate) credentials: Arc<dyn CredentialsProvider>,
+    pub(crate) signer: Arc<dyn Signer>,
+    pub(crate) region: Region,
+    pub(crate) endpoint: String,
 }
 
 #[derive(Clone)]

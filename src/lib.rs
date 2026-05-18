@@ -2,6 +2,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod operations;
 pub mod signer;
 pub mod types;
 pub mod util;
