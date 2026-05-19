@@ -305,6 +305,67 @@ pub struct DeletedObject {
     pub version_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename = "ListVersionsResult")]
+pub struct ListVersionsOutput {
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "Prefix", default)]
+    pub prefix: String,
+    #[serde(rename = "KeyMarker", default)]
+    pub key_marker: String,
+    #[serde(rename = "VersionIdMarker", default)]
+    pub version_id_marker: String,
+    #[serde(rename = "MaxKeys")]
+    pub max_keys: i32,
+    #[serde(rename = "IsTruncated")]
+    pub is_truncated: bool,
+    #[serde(rename = "NextKeyMarker", default)]
+    pub next_key_marker: String,
+    #[serde(rename = "NextVersionIdMarker", default)]
+    pub next_version_id_marker: String,
+    #[serde(rename = "Version", default)]
+    pub versions: Vec<ObjectVersion>,
+    #[serde(rename = "DeleteMarker", default)]
+    pub delete_markers: Vec<DeleteMarkerSummary>,
+    #[serde(rename = "CommonPrefixes", default)]
+    pub common_prefixes: Vec<CommonPrefix>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ObjectVersion {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "VersionId")]
+    pub version_id: String,
+    #[serde(rename = "IsLatest")]
+    pub is_latest: bool,
+    #[serde(rename = "LastModified")]
+    pub last_modified: String,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+    #[serde(rename = "Size")]
+    pub size: u64,
+    #[serde(rename = "StorageClass")]
+    pub storage_class: String,
+    #[serde(rename = "Owner", default)]
+    pub owner: Option<OwnerInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct DeleteMarkerSummary {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "VersionId")]
+    pub version_id: String,
+    #[serde(rename = "IsLatest")]
+    pub is_latest: bool,
+    #[serde(rename = "LastModified")]
+    pub last_modified: String,
+    #[serde(rename = "Owner", default)]
+    pub owner: Option<OwnerInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

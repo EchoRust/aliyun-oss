@@ -527,6 +527,10 @@ impl BucketOperations {
             keys,
         )
     }
+
+    pub fn list_object_versions(&self) -> ListObjectVersionsBuilder {
+        ListObjectVersionsBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
 }
 
 pub struct GetObjectBuilder {
@@ -1708,6 +1712,142 @@ impl DeleteMultipleObjectsBuilder {
     }
 }
 
+pub struct ListObjectVersionsBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    prefix: Option<String>,
+    delimiter: Option<String>,
+    key_marker: Option<String>,
+    version_id_marker: Option<String>,
+    max_keys: Option<i32>,
+    encoding_type: Option<String>,
+}
+
+impl ListObjectVersionsBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self {
+            client,
+            bucket,
+            prefix: None,
+            delimiter: None,
+            key_marker: None,
+            version_id_marker: None,
+            max_keys: None,
+            encoding_type: None,
+        }
+    }
+
+    pub fn prefix(mut self, v: impl Into<String>) -> Self {
+        self.prefix = Some(v.into());
+        self
+    }
+
+    pub fn delimiter(mut self, v: impl Into<String>) -> Self {
+        self.delimiter = Some(v.into());
+        self
+    }
+
+    pub fn key_marker(mut self, v: impl Into<String>) -> Self {
+        self.key_marker = Some(v.into());
+        self
+    }
+
+    pub fn version_id_marker(mut self, v: impl Into<String>) -> Self {
+        self.version_id_marker = Some(v.into());
+        self
+    }
+
+    pub fn max_keys(mut self, v: i32) -> Self {
+        self.max_keys = Some(v);
+        self
+    }
+
+    pub fn encoding_type(mut self, v: impl Into<String>) -> Self {
+        self.encoding_type = Some(v.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::ListVersionsOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(&endpoint, Some(self.bucket.as_str()), None);
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        query_pairs.push(("versions".into(), String::new()));
+        if let Some(ref p) = self.prefix {
+            query_pairs.push(("prefix".into(), crate::util::uri::uri_encode(p)));
+        }
+        if let Some(ref d) = self.delimiter {
+            query_pairs.push(("delimiter".into(), d.clone()));
+        }
+        if let Some(ref km) = self.key_marker {
+            query_pairs.push(("key-marker".into(), km.clone()));
+        }
+        if let Some(ref vim) = self.version_id_marker {
+            query_pairs.push(("version-id-marker".into(), vim.clone()));
+        }
+        if let Some(mk) = self.max_keys {
+            query_pairs.push(("max-keys".into(), mk.to_string()));
+        }
+        if let Some(ref et) = self.encoding_type {
+            query_pairs.push(("encoding-type".into(), et.clone()));
+        }
+
+        let query_string: String = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjectVersions".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjectVersions".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -2209,5 +2349,41 @@ mod tests {
 
         assert_eq!(result.deleted.len(), 2);
         eprintln!("DeleteMultiple: {} objects deleted", result.deleted.len());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_list_object_versions() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .list_object_versions()
+            .max_keys(5)
+            .send()
+            .await
+            .unwrap();
+
+        eprintln!(
+            "ListObjectVersions: {} versions, {} delete_markers",
+            output.versions.len(),
+            output.delete_markers.len()
+        );
+        assert!(!output.name.is_empty());
     }
 }
