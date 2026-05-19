@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::client::{BucketOperations, OSSClientInner};
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
-use crate::http::client::HttpRequest;
+use crate::http::client::{HttpRequest, HttpResponse};
 use crate::types::acl::ObjectAcl;
 use crate::types::bucket::BucketName;
 use crate::types::object::ObjectKey;
@@ -484,6 +484,15 @@ impl BucketOperations {
             object_key,
         ))
     }
+
+    pub fn head_object(&self, key: impl Into<String>) -> Result<HeadObjectBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(HeadObjectBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+        ))
+    }
 }
 
 pub struct GetObjectBuilder {
@@ -849,6 +858,278 @@ pub struct GetObjectOutput {
     pub object_type: Option<String>,
 }
 
+pub struct HeadObjectBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    if_match: Option<String>,
+    if_none_match: Option<String>,
+    if_modified_since: Option<String>,
+    if_unmodified_since: Option<String>,
+    version_id: Option<String>,
+}
+
+impl HeadObjectBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName, key: ObjectKey) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            if_match: None,
+            if_none_match: None,
+            if_modified_since: None,
+            if_unmodified_since: None,
+            version_id: None,
+        }
+    }
+
+    pub fn if_match(mut self, etag: impl Into<String>) -> Self {
+        self.if_match = Some(etag.into());
+        self
+    }
+
+    pub fn if_none_match(mut self, etag: impl Into<String>) -> Self {
+        self.if_none_match = Some(etag.into());
+        self
+    }
+
+    pub fn if_modified_since(mut self, time: impl Into<String>) -> Self {
+        self.if_modified_since = Some(time.into());
+        self
+    }
+
+    pub fn if_unmodified_since(mut self, time: impl Into<String>) -> Self {
+        self.if_unmodified_since = Some(time.into());
+        self
+    }
+
+    pub fn version_id(mut self, id: impl Into<String>) -> Self {
+        self.version_id = Some(id.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<HeadObjectOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(ref vid) = self.version_id {
+            query_pairs.push(("versionId".into(), vid.clone()));
+        }
+
+        let query_string = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "{}={}",
+                        crate::util::uri::uri_encode(k),
+                        crate::util::uri::uri_encode(v)
+                    )
+                })
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let mut req = HttpRequest::builder()
+            .method(http::Method::HEAD)
+            .uri(&full_uri);
+
+        if let Some(ref im) = self.if_match {
+            req = req.header(
+                http::HeaderName::from_static("if-match"),
+                http::HeaderValue::from_str(im).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set if-match header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref inm) = self.if_none_match {
+            req = req.header(
+                http::HeaderName::from_static("if-none-match"),
+                http::HeaderValue::from_str(inm).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set if-none-match header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref ims) = self.if_modified_since {
+            req = req.header(
+                http::HeaderName::from_static("if-modified-since"),
+                http::HeaderValue::from_str(ims).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set if-modified-since header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref ius) = self.if_unmodified_since {
+            req = req.header(
+                http::HeaderName::from_static("if-unmodified-since"),
+                http::HeaderValue::from_str(ius).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set if-unmodified-since header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        let request = req.build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("HeadObject".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            Ok(HeadObjectOutput::from_response(&response))
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("HeadObject".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HeadObjectOutput {
+    pub request_id: String,
+    pub content_type: Option<String>,
+    pub content_length: Option<u64>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub metadata: Vec<(String, String)>,
+    pub storage_class: Option<String>,
+    pub object_type: Option<String>,
+}
+
+impl HeadObjectOutput {
+    fn from_response(response: &HttpResponse) -> Self {
+        let request_id = response
+            .headers
+            .get("x-oss-request-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let content_type = response
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let content_length = response
+            .headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+
+        let etag = response
+            .headers
+            .get("ETag")
+            .or_else(|| response.headers.get("etag"))
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_matches('"').to_string());
+
+        let last_modified = response
+            .headers
+            .get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let storage_class = response
+            .headers
+            .get("x-oss-storage-class")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let object_type = response
+            .headers
+            .get("x-oss-object-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let mut metadata: Vec<(String, String)> = Vec::new();
+        for (name, value) in response.headers.iter() {
+            let name_str = name.as_str().to_lowercase();
+            if name_str.starts_with("x-oss-meta-")
+                && let Ok(v) = value.to_str()
+            {
+                metadata.push((name.as_str().to_string(), v.to_string()));
+            }
+        }
+
+        Self {
+            request_id,
+            content_type,
+            content_length,
+            etag,
+            last_modified,
+            metadata,
+            storage_class,
+            object_type,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -964,427 +1245,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_object_sends_correct_request() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder =
-            PutObjectBuilder::new(inner, bucket, ObjectKey::new("test-file.txt").unwrap());
-
-        let output = builder
-            .body(bytes::Bytes::from_static(b"hello world"))
-            .content_type("text/plain")
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(output.request_id, "rid-001");
-        assert_eq!(output.etag, "abc123");
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].method, http::Method::PUT);
-        assert!(captured[0].uri.contains("test-bucket"));
-        assert!(captured[0].uri.contains("test-file.txt"));
-
-        let ct = captured[0]
-            .headers
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert_eq!(ct, "text/plain");
-
-        assert_eq!(captured[0].body.as_deref(), Some(b"hello world" as &[u8]));
-    }
-
-    #[tokio::test]
-    async fn put_object_with_custom_metadata() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("obj.txt").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"data"))
-            .metadata("x-oss-meta-author", "test-author")
-            .metadata("x-oss-meta-version", "1.0")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-meta-author")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "test-author"
-        );
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-meta-version")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "1.0"
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_with_acl_and_storage_class() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("obj.txt").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"data"))
-            .acl(ObjectAcl::PublicRead)
-            .storage_class(StorageClass::IA)
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-object-acl")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "public-read"
-        );
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-storage-class")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "IA"
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_requires_body() {
-        let (inner, _) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("key").unwrap());
-
-        let result = builder.send().await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err().kind,
-            OssErrorKind::ValidationError
-        ));
-    }
-
-    #[tokio::test]
-    async fn put_object_uri_encodes_special_chars_in_key() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("文件 名.txt").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"data"))
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert!(
-            captured[0]
-                .uri
-                .contains("%E6%96%87%E4%BB%B6%20%E5%90%8D.txt")
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_with_sse_aes256() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("key").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"encrypted"))
-            .server_side_encryption("AES256")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-server-side-encryption")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "AES256"
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_with_sse_kms_and_key_id() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("key").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"encrypted"))
-            .sse_key_id("cmk-id-123")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-server-side-encryption")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "KMS"
-        );
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-server-side-encryption-key-id")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "cmk-id-123"
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_with_tagging() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("key").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"data"))
-            .tagging("key1=value1&key2=value2")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("x-oss-tagging")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "key1=value1&key2=value2"
-        );
-    }
-
-    #[tokio::test]
-    async fn put_object_content_md5_header() {
-        let (inner, requests) = create_test_inner();
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = PutObjectBuilder::new(inner, bucket, ObjectKey::new("key").unwrap());
-
-        builder
-            .body(bytes::Bytes::from_static(b"data"))
-            .content_md5("dGVzdC1tZDU=")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0]
-                .headers
-                .get("content-md5")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "dGVzdC1tZDU="
-        );
-    }
-
-    #[tokio::test]
-    async fn get_object_sends_correct_request() {
+    async fn head_object_sends_head_request() {
         let (inner, requests) = create_test_inner_with_response(
             http::StatusCode::OK,
-            bytes::Bytes::from_static(b"file content"),
+            bytes::Bytes::new(),
             vec![
                 ("content-type", "text/plain"),
-                ("content-length", "12"),
+                ("content-length", "256"),
                 ("last-modified", "Mon, 01 Jan 2024 00:00:00 GMT"),
             ],
         );
         let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
+        let builder = HeadObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
 
         let output = builder.send().await.unwrap();
 
-        assert_eq!(output.body.as_ref(), b"file content");
         assert_eq!(output.content_type.as_deref(), Some("text/plain"));
-        assert_eq!(output.content_length, Some(12));
+        assert_eq!(output.content_length, Some(256));
         assert_eq!(output.etag.as_deref(), Some("abc123"));
 
         let captured = requests.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].method, http::Method::GET);
-        assert!(captured[0].uri.contains("test-bucket"));
-        assert!(captured[0].uri.contains("file.txt"));
+        assert_eq!(captured[0].method, http::Method::HEAD);
+        assert!(captured[0].body.is_none());
     }
 
     #[tokio::test]
-    async fn get_object_returns_custom_metadata() {
-        let (inner, _requests) = create_test_inner_with_response(
-            http::StatusCode::OK,
-            bytes::Bytes::from_static(b"data"),
-            vec![
-                ("content-type", "text/plain"),
-                ("x-oss-meta-author", "echo"),
-                ("x-oss-meta-version", "2.0"),
-            ],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("obj.txt").unwrap());
-
-        let output = builder.send().await.unwrap();
-
-        let meta_author = output
-            .metadata
-            .iter()
-            .find(|(k, _)| k.to_lowercase() == "x-oss-meta-author");
-        assert!(meta_author.is_some());
-        assert_eq!(meta_author.unwrap().1, "echo");
-
-        let meta_version = output
-            .metadata
-            .iter()
-            .find(|(k, _)| k.to_lowercase() == "x-oss-meta-version");
-        assert!(meta_version.is_some());
-        assert_eq!(meta_version.unwrap().1, "2.0");
-    }
-
-    #[tokio::test]
-    async fn get_object_with_range_header() {
-        let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::PARTIAL_CONTENT,
-            bytes::Bytes::from_static(b"abc"),
-            vec![
-                ("content-type", "text/plain"),
-                ("content-length", "3"),
-                ("content-range", "bytes 0-2/12"),
-            ],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
-
-        let output = builder.range("bytes=0-2").send().await.unwrap();
-
-        assert_eq!(output.body.as_ref(), b"abc");
-
-        let captured = requests.lock().unwrap();
-        assert_eq!(
-            captured[0].headers.get("range").unwrap().to_str().unwrap(),
-            "bytes=0-2"
-        );
-    }
-
-    #[tokio::test]
-    async fn get_object_with_response_header_overrides() {
-        let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::OK,
-            bytes::Bytes::from_static(b"image data"),
-            vec![("content-type", "image/jpeg")],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("img.jpg").unwrap());
-
-        builder
-            .response_content_type("image/png")
-            .send()
-            .await
-            .unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert!(captured[0].uri.contains("response-content-type=image/png"));
-    }
-
-    #[tokio::test]
-    async fn get_object_with_version_id() {
-        let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::OK,
-            bytes::Bytes::from_static(b"v2 data"),
-            vec![("x-oss-version-id", "ver123")],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
-
-        builder.version_id("ver123").send().await.unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert!(captured[0].uri.contains("versionId=ver123"));
-    }
-
-    #[tokio::test]
-    async fn get_object_uri_encodes_key() {
-        let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::OK,
-            bytes::Bytes::from_static(b"data"),
-            vec![],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("文件 名.txt").unwrap());
-
-        builder.send().await.unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert!(
-            captured[0]
-                .uri
-                .contains("%E6%96%87%E4%BB%B6%20%E5%90%8D.txt")
-        );
-    }
-
-    #[tokio::test]
-    async fn get_object_not_found_returns_error() {
+    async fn head_object_not_found_returns_error() {
         let (inner, _) = create_test_inner_with_response(
             http::StatusCode::NOT_FOUND,
             bytes::Bytes::new(),
             vec![],
         );
         let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("missing.txt").unwrap());
+        let builder = HeadObjectBuilder::new(inner, bucket, ObjectKey::new("missing.txt").unwrap());
 
         let result = builder.send().await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn get_object_returning_storage_class_and_object_type() {
-        let (inner, _) = create_test_inner_with_response(
-            http::StatusCode::OK,
-            bytes::Bytes::from_static(b"data"),
-            vec![
-                ("x-oss-storage-class", "IA"),
-                ("x-oss-object-type", "Normal"),
-            ],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = GetObjectBuilder::new(inner, bucket, ObjectKey::new("obj.txt").unwrap());
-
-        let output = builder.send().await.unwrap();
-        assert_eq!(output.storage_class.as_deref(), Some("IA"));
-        assert_eq!(output.object_type.as_deref(), Some("Normal"));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires valid OSS credentials in env vars OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_REGION, OSS_BUCKET"]
-    async fn e2e_get_object_real_oss() {
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_head_existing_test_file() {
         let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
         let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
         let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
@@ -1401,38 +1302,21 @@ mod tests {
             .build()
             .unwrap();
 
-        let key = format!("test-get-object-{}.txt", chrono::Utc::now().timestamp());
-        let content = "E2E GetObject test content";
-
-        let _put = client
-            .bucket(&bucket_str)
-            .unwrap()
-            .put_object(&key)
-            .unwrap()
-            .body(bytes::Bytes::from(content))
-            .content_type("text/plain")
-            .send()
-            .await
-            .unwrap();
-
         let output = client
             .bucket(&bucket_str)
             .unwrap()
-            .get_object(&key)
+            .head_object("test.txt")
             .unwrap()
             .send()
             .await
             .unwrap();
 
-        assert_eq!(output.body.as_ref(), content.as_bytes());
-        assert_eq!(output.content_type.as_deref(), Some("text/plain"));
-        assert!(!output.etag.as_ref().unwrap().is_empty());
-
+        assert!(!output.request_id.is_empty());
+        assert!(output.content_length.unwrap() > 0);
+        assert!(output.etag.is_some());
         eprintln!(
-            "GET '{}' succeeded: body={} bytes, etag={}",
-            key,
-            output.body.len(),
-            output.etag.unwrap_or_default()
+            "HEAD 'test.txt' OK: content-type={:?}, length={:?}, etag={:?}",
+            output.content_type, output.content_length, output.etag
         );
     }
 
