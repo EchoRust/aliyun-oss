@@ -93,6 +93,10 @@ impl OSSClient {
         &self.inner.endpoint
     }
 
+    pub(crate) fn inner(&self) -> &Arc<OSSClientInner> {
+        &self.inner
+    }
+
     pub fn bucket(&self, name: impl Into<String>) -> Result<BucketOperations> {
         let bucket = BucketName::new(name.into())?;
         Ok(BucketOperations {
