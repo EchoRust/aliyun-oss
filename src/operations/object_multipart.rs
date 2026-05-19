@@ -22,6 +22,64 @@ struct InitiateMultipartUploadResult {
     upload_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename = "ListMultipartUploadsResult")]
+struct ListMultipartUploadsResult {
+    #[serde(rename = "Bucket")]
+    bucket: String,
+    #[serde(rename = "Upload", default)]
+    uploads: Vec<MultipartUpload>,
+    #[serde(rename = "IsTruncated")]
+    is_truncated: bool,
+    #[serde(rename = "NextKeyMarker", default)]
+    next_key_marker: String,
+    #[serde(rename = "NextUploadIdMarker", default)]
+    next_upload_id_marker: String,
+    #[serde(rename = "MaxUploads")]
+    max_uploads: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MultipartUpload {
+    #[serde(rename = "Key")]
+    key: String,
+    #[serde(rename = "UploadId")]
+    upload_id: String,
+    #[serde(rename = "Initiated")]
+    initiated: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename = "ListPartsResult")]
+struct ListPartsResult {
+    #[serde(rename = "Bucket")]
+    bucket: String,
+    #[serde(rename = "Key")]
+    key: String,
+    #[serde(rename = "UploadId")]
+    upload_id: String,
+    #[serde(rename = "Part", default)]
+    parts: Vec<PartSummary>,
+    #[serde(rename = "MaxParts")]
+    max_parts: i32,
+    #[serde(rename = "IsTruncated")]
+    is_truncated: bool,
+    #[serde(rename = "NextPartNumberMarker", default)]
+    next_part_number_marker: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PartSummary {
+    #[serde(rename = "PartNumber")]
+    part_number: i32,
+    #[serde(rename = "LastModified")]
+    last_modified: String,
+    #[serde(rename = "ETag")]
+    etag: String,
+    #[serde(rename = "Size")]
+    size: u64,
+}
+
 pub struct InitiateMultipartUploadBuilder {
     client: Arc<OSSClientInner>,
     bucket: BucketName,
@@ -875,6 +933,344 @@ pub struct CompleteMultipartUploadOutput {
     pub etag: String,
 }
 
+pub struct ListMultipartUploadsBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    prefix: Option<String>,
+    delimiter: Option<String>,
+    max_uploads: Option<i32>,
+    key_marker: Option<String>,
+    upload_id_marker: Option<String>,
+    encoding_type: Option<String>,
+}
+
+impl ListMultipartUploadsBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self {
+            client,
+            bucket,
+            prefix: None,
+            delimiter: None,
+            max_uploads: None,
+            key_marker: None,
+            upload_id_marker: None,
+            encoding_type: None,
+        }
+    }
+
+    pub fn prefix(mut self, v: impl Into<String>) -> Self {
+        self.prefix = Some(v.into());
+        self
+    }
+
+    pub fn delimiter(mut self, v: impl Into<String>) -> Self {
+        self.delimiter = Some(v.into());
+        self
+    }
+
+    pub fn max_uploads(mut self, v: i32) -> Self {
+        self.max_uploads = Some(v);
+        self
+    }
+
+    pub fn key_marker(mut self, v: impl Into<String>) -> Self {
+        self.key_marker = Some(v.into());
+        self
+    }
+
+    pub fn upload_id_marker(mut self, v: impl Into<String>) -> Self {
+        self.upload_id_marker = Some(v.into());
+        self
+    }
+
+    pub fn encoding_type(mut self, v: impl Into<String>) -> Self {
+        self.encoding_type = Some(v.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<ListMultipartUploadsOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(&endpoint, Some(self.bucket.as_str()), None);
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        query_pairs.push(("uploads".into(), String::new()));
+        if let Some(ref p) = self.prefix {
+            query_pairs.push(("prefix".into(), crate::util::uri::uri_encode(p)));
+        }
+        if let Some(ref d) = self.delimiter {
+            query_pairs.push(("delimiter".into(), d.clone()));
+        }
+        if let Some(mu) = self.max_uploads {
+            query_pairs.push(("max-uploads".into(), mu.to_string()));
+        }
+        if let Some(ref km) = self.key_marker {
+            query_pairs.push(("key-marker".into(), km.clone()));
+        }
+        if let Some(ref uim) = self.upload_id_marker {
+            query_pairs.push(("upload-id-marker".into(), uim.clone()));
+        }
+        if let Some(ref et) = self.encoding_type {
+            query_pairs.push(("encoding-type".into(), et.clone()));
+        }
+
+        let query_string: String = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("ListMultipartUploads".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            let result: ListMultipartUploadsResult =
+                crate::util::xml::from_xml(body_str).map_err(|e| OssError {
+                    kind: OssErrorKind::DeserializationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("ListMultipartUploads: parse XML".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?;
+
+            Ok(ListMultipartUploadsOutput {
+                bucket: result.bucket,
+                uploads: result
+                    .uploads
+                    .into_iter()
+                    .map(|u| MultipartUploadInfo {
+                        key: u.key,
+                        upload_id: u.upload_id,
+                        initiated: u.initiated,
+                    })
+                    .collect(),
+                is_truncated: result.is_truncated,
+                next_key_marker: result.next_key_marker,
+                next_upload_id_marker: result.next_upload_id_marker,
+                max_uploads: result.max_uploads,
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("ListMultipartUploads".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ListMultipartUploadsOutput {
+    pub bucket: String,
+    pub uploads: Vec<MultipartUploadInfo>,
+    pub is_truncated: bool,
+    pub next_key_marker: String,
+    pub next_upload_id_marker: String,
+    pub max_uploads: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct MultipartUploadInfo {
+    pub key: String,
+    pub upload_id: String,
+    pub initiated: String,
+}
+
+pub struct ListPartsBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    upload_id: String,
+    max_parts: Option<i32>,
+    part_number_marker: Option<i32>,
+    encoding_type: Option<String>,
+}
+
+impl ListPartsBuilder {
+    pub(crate) fn new(
+        client: Arc<OSSClientInner>,
+        bucket: BucketName,
+        key: ObjectKey,
+        upload_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id: upload_id.into(),
+            max_parts: None,
+            part_number_marker: None,
+            encoding_type: None,
+        }
+    }
+
+    pub fn max_parts(mut self, v: i32) -> Self {
+        self.max_parts = Some(v);
+        self
+    }
+
+    pub fn part_number_marker(mut self, v: i32) -> Self {
+        self.part_number_marker = Some(v);
+        self
+    }
+
+    pub fn encoding_type(mut self, v: impl Into<String>) -> Self {
+        self.encoding_type = Some(v.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<ListPartsOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+        let full_uri = format!("{}?uploadId={}", uri, self.upload_id);
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        query_pairs.push(("uploadId".into(), self.upload_id.clone()));
+        if let Some(mp) = self.max_parts {
+            query_pairs.push(("max-parts".into(), mp.to_string()));
+        }
+        if let Some(pnm) = self.part_number_marker {
+            query_pairs.push(("part-number-marker".into(), pnm.to_string()));
+        }
+        if let Some(ref et) = self.encoding_type {
+            query_pairs.push(("encoding-type".into(), et.clone()));
+        }
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("ListParts".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            let result: ListPartsResult =
+                crate::util::xml::from_xml(body_str).map_err(|e| OssError {
+                    kind: OssErrorKind::DeserializationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("ListParts: parse XML".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?;
+
+            Ok(ListPartsOutput {
+                bucket: result.bucket,
+                key: result.key,
+                upload_id: result.upload_id,
+                parts: result
+                    .parts
+                    .into_iter()
+                    .map(|p| PartInfo {
+                        part_number: p.part_number,
+                        last_modified: p.last_modified,
+                        etag: p.etag.trim_matches('"').to_string(),
+                        size: p.size,
+                    })
+                    .collect(),
+                max_parts: result.max_parts,
+                is_truncated: result.is_truncated,
+                next_part_number_marker: result.next_part_number_marker,
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("ListParts".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ListPartsOutput {
+    pub bucket: String,
+    pub key: String,
+    pub upload_id: String,
+    pub parts: Vec<PartInfo>,
+    pub max_parts: i32,
+    pub is_truncated: bool,
+    pub next_part_number_marker: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartInfo {
+    pub part_number: i32,
+    pub last_modified: String,
+    pub etag: String,
+    pub size: u64,
+}
+
 pub struct UploadPartCopyBuilder {
     client: Arc<OSSClientInner>,
     bucket: BucketName,
@@ -1210,6 +1606,24 @@ impl BucketOperations {
     ) -> Result<AbortMultipartUploadBuilder> {
         let object_key = ObjectKey::new(key.into())?;
         Ok(AbortMultipartUploadBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+            upload_id,
+        ))
+    }
+
+    pub fn list_multipart_uploads(&self) -> ListMultipartUploadsBuilder {
+        ListMultipartUploadsBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
+
+    pub fn list_parts(
+        &self,
+        key: impl Into<String>,
+        upload_id: impl Into<String>,
+    ) -> Result<ListPartsBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(ListPartsBuilder::new(
             self.client_inner().clone(),
             self.bucket_name().clone(),
             object_key,
@@ -1813,5 +2227,58 @@ mod tests {
 
         assert!(!output.request_id.is_empty());
         eprintln!("AbortMultipartUpload: key={}", key);
+    }
+
+    #[tokio::test]
+    async fn list_multipart_uploads_parses_xml() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListMultipartUploadsResult>
+  <Bucket>bucket</Bucket>
+  <Upload>
+    <Key>obj1</Key>
+    <UploadId>upload-id-1</UploadId>
+    <Initiated>2024-01-01T00:00:00.000Z</Initiated>
+  </Upload>
+  <IsTruncated>false</IsTruncated>
+  <MaxUploads>100</MaxUploads>
+</ListMultipartUploadsResult>"#;
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::from(xml), vec![]);
+        let builder =
+            ListMultipartUploadsBuilder::new(inner, BucketName::new("test-bucket").unwrap());
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.uploads.len(), 1);
+        assert_eq!(output.uploads[0].key, "obj1");
+        assert!(!output.is_truncated);
+    }
+
+    #[tokio::test]
+    async fn list_parts_parses_xml() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult>
+  <Bucket>bucket</Bucket>
+  <Key>key</Key>
+  <UploadId>upload-123</UploadId>
+  <Part>
+    <PartNumber>1</PartNumber>
+    <LastModified>2024-01-01T00:00:00.000Z</LastModified>
+    <ETag>"etag1"</ETag>
+    <Size>1024</Size>
+  </Part>
+  <MaxParts>1000</MaxParts>
+  <IsTruncated>false</IsTruncated>
+</ListPartsResult>"#;
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::from(xml), vec![]);
+        let builder = ListPartsBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("key").unwrap(),
+            "upload-123",
+        );
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.parts.len(), 1);
+        assert_eq!(output.parts[0].part_number, 1);
+        assert_eq!(output.parts[0].etag, "etag1");
     }
 }
