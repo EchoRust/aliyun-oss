@@ -1,12 +1,15 @@
 pub mod bucket;
 pub mod bucket_acl;
+pub mod bucket_archive_read;
 pub mod bucket_cors;
 pub mod bucket_encryption;
 pub mod bucket_lifecycle;
 pub mod bucket_logging;
 pub mod bucket_policy;
 pub mod bucket_referer;
+pub mod bucket_request_payment;
 pub mod bucket_tags;
+pub mod bucket_transfer_accel;
 pub mod bucket_versioning;
 pub mod bucket_website;
 pub mod object;
