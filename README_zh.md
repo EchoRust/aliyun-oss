@@ -4,24 +4,24 @@
 [![Docs.rs](https://docs.rs/aliyun-oss/badge.svg)](https://docs.rs/aliyun-oss)
 [![License](https://img.shields.io/crates/l/aliyun-oss.svg)](LICENSE)
 
-A fully async, type-safe Rust SDK for [Alibaba Cloud Object Storage Service (OSS)](https://www.aliyun.com/product/oss).
+[阿里云对象存储 OSS](https://www.aliyun.com/product/oss) 的 Rust 原生异步 SDK。类型安全、全异步、覆盖 80+ API 操作。
 
-## Features
+## 特性
 
-- **Async-first** — Built on `tokio` and `reqwest`, all network I/O is non-blocking
-- **V4 Sigining** — HMAC-SHA256 request signing with known-answer test verification
-- **V1 Sigining** — HMAC-SHA1 signing for legacy compatibility
-- **Pre-signed URLs** — Generate time-limited download URLs without sharing credentials
-- **Full Object CRUD** — Put, Get, Head, Delete, Copy, Append with metadata, ACL, and SSE support
-- **Multipart Upload** — Initiate, upload parts (with automatic Content-MD5), copy parts, complete, and abort
-- **Bucket Configuration** — Lifecycle, CORS, policy, encryption, versioning, logging, website, referer, tagging, replication, WORM, TLS, and more
-- **Type-safe** — Newtype wrappers for bucket names, object keys, ETags, regions, and storage classes
-- **Credentials Chain** — Environment variables, static credentials, and custom provider support
-- **Rich Error Handling** — Structured error types with OSS service error parsing and contextual information
+- **全异步** — 基于 `tokio` 和 `reqwest`，所有网络 I/O 非阻塞
+- **V4 签名** — HMAC-SHA256 请求签名，通过官方已知答案测试验证
+- **V1 签名** — HMAC-SHA1 签名，兼容旧版
+- **预签名 URL** — 生成有时效的下载链接，无需暴露凭证
+- **对象 CRUD** — Put、Get、Head、Delete、Copy、Append，支持元数据、ACL、服务端加密
+- **分片上传** — 初始化、上传分片（自动 Content-MD5）、拷贝分片、完成、中止
+- **Bucket 配置** — 生命周期、CORS、Policy、加密、版本控制、日志、网站、防盗链、标签、复制、WORM、TLS 等
+- **类型安全** — Bucket 名称、Object Key、ETag、Region、存储类型均用 newtype 封装
+- **凭证链** — 支持环境变量、静态凭证、自定义 Provider
+- **结构化错误** — 包含 OSS 服务端错误解析和上下文信息的错误类型
 
-## Installation
+## 安装
 
-Add to your `Cargo.toml`:
+在 `Cargo.toml` 中添加：
 
 ```toml
 [dependencies]
@@ -29,7 +29,7 @@ aliyun-oss = "0.2"
 tokio = { version = "1", features = ["full"] }
 ```
 
-## Quick Start
+## 快速开始
 
 ```rust
 use aliyun_oss::client::OSSClient;
@@ -42,7 +42,7 @@ async fn main() -> aliyun_oss::error::Result<()> {
         .credentials("your-access-key-id", "your-access-key-secret")
         .build()?;
 
-    // Upload an object
+    // 上传对象
     client
         .bucket("my-bucket")?
         .put_object("hello.txt")?
@@ -51,31 +51,29 @@ async fn main() -> aliyun_oss::error::Result<()> {
         .send()
         .await?;
 
-    // Download an object
+    // 下载对象
     let output = client
         .bucket("my-bucket")?
         .get_object("hello.txt")?
         .send()
         .await?;
 
-    println!("Downloaded {} bytes", output.body.len());
+    println!("下载了 {} 字节", output.body.len());
     Ok(())
 }
 ```
 
-## Authentication
-
-Credentials can be provided in several ways:
+## 认证方式
 
 ```rust
 use aliyun_oss::config::credentials::{
     Credentials, EnvironmentCredentialsProvider, CredentialsChain,
 };
 
-// From environment variables (OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
+// 从环境变量读取 (OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
 let provider = EnvironmentCredentialsProvider::new();
 
-// Chained fallback: try env first, then static
+// 链式回退：先尝试环境变量，再尝试静态凭证
 let chain = CredentialsChain::builder()
     .with(EnvironmentCredentialsProvider::new())
     .with(StaticCredentialsProvider::new(
@@ -86,14 +84,14 @@ let chain = CredentialsChain::builder()
     ))
     .build();
 
-// Or directly in the builder
+// 或直接在 Builder 中指定
 let client = OSSClient::builder()
     .region(Region::CnHangzhou)
     .credentials("your-ak", "your-sk")
     .build()?;
 ```
 
-For STS temporary credentials:
+STS 临时凭证：
 
 ```rust
 let creds = Credentials::builder()
@@ -103,14 +101,14 @@ let creds = Credentials::builder()
     .build()?;
 ```
 
-## Object Operations
+## 对象操作
 
-### Basic CRUD
+### 基本 CRUD
 
 ```rust
 let bucket = client.bucket("my-bucket")?;
 
-// Put
+// 上传
 let put = bucket.put_object("data.json")?
     .body(json_bytes)
     .content_type("application/json")
@@ -119,21 +117,19 @@ let put = bucket.put_object("data.json")?
     .metadata("x-oss-meta-author", "echo")
     .send().await?;
 
-// Get
+// 下载
 let get = bucket.get_object("data.json")?
     .range("bytes=0-1023")
-    .if_match("\"etag-value\"")
     .send().await?;
 
-// Head (metadata only, no body)
-let head = bucket.head_object("data.json")?
-    .send().await?;
+// 获取元数据（不含 Body）
+let head = bucket.head_object("data.json")?.send().await?;
 
-// Delete
+// 删除
 bucket.delete_object("data.json")?.send().await?;
 ```
 
-### Copy
+### 拷贝
 
 ```rust
 bucket.put_object("dest.txt")?
@@ -141,43 +137,42 @@ bucket.put_object("dest.txt")?
     .send().await?;
 ```
 
-### Append
+### 追加上传
 
 ```rust
-bucket.append_object("log.txt", 0)?  // position = 0 for first append
+bucket.append_object("log.txt", 0)?   // position = 0 表示首次追加
     .body("first chunk")
     .send().await?;
 
-bucket.append_object("log.txt", 11)? // position = current object size
+bucket.append_object("log.txt", 11)?  // position = 对象当前大小
     .body("second chunk")
     .send().await?;
 ```
 
-### List Objects
+### 列举对象
 
 ```rust
-// V1 listing
+// V1 列举
 let objects = bucket.list_objects()
     .prefix("photos/")
     .delimiter("/")
     .max_keys(100)
     .send().await?;
 
-// V2 listing (supports continuation token)
+// V2 列举（支持 continuation token）
 let objects = bucket.list_objects_v2()
     .prefix("photos/")
     .start_after("photos/img_001.jpg")
     .max_keys(50)
     .send().await?;
 
-// List all versions (requires versioning enabled)
+// 列举所有版本（需先启用版本控制）
 let versions = bucket.list_object_versions()
-    .prefix("data/")
     .max_keys(100)
     .send().await?;
 ```
 
-### Tagging
+### 标签
 
 ```rust
 bucket.put_object_tagging("file.txt")?
@@ -189,58 +184,55 @@ let tags = bucket.get_object_tagging("file.txt")?.send().await?;
 bucket.delete_object_tagging("file.txt")?.send().await?;
 ```
 
-### Object ACL
+### 对象 ACL
 
 ```rust
-// Get ACL
 let acl = bucket.get_object_acl("file.txt")?.send().await?;
-
-// Set ACL
 bucket.put_object_acl("file.txt", ObjectAcl::PublicRead)?.send().await?;
 ```
 
-### Symlink
+### 软链接
 
 ```rust
 bucket.put_symlink("link.txt", "target.txt")?.send().await?;
 let sym = bucket.get_symlink("link.txt")?.send().await?;
 ```
 
-### Restore (Archive/ColdArchive)
+### 归档解冻
 
 ```rust
-bucket.restore_object("archive-file.bin", 3)?  // restore for 3 days
+bucket.restore_object("archive.bin", 3)?  // 解冻 3 天
     .tier("Standard")
     .send().await?;
 ```
 
-### Batch Delete
+### 批量删除
 
 ```rust
-let result = bucket.delete_multiple_objects(vec![
+bucket.delete_multiple_objects(vec![
     "file1.txt".into(),
     "file2.txt".into(),
-]).quiet(true).send().await?;
+]).send().await?;
 ```
 
-### Image Processing
+### 图片处理
 
 ```rust
-let processed = bucket.process_object("photo.jpg", "image/resize,m_fixed,w_200")?
+let img = bucket.process_object("photo.jpg", "image/resize,m_fixed,w_200")?
     .send().await?;
 ```
 
-## Multipart Upload
+## 分片上传
 
-For files larger than 5 GiB or when resumable upload is needed:
+适用于大于 5 GiB 的文件或需要断点续传的场景：
 
 ```rust
-// Initiate
+// 初始化
 let init = bucket.initiate_multipart_upload("large-file.bin")?
     .content_type("application/octet-stream")
     .send().await?;
 
-// Upload parts (Content-MD5 is computed automatically)
+// 上传分片（Content-MD5 自动计算）
 let part1 = bucket.upload_part("large-file.bin", &init.upload_id, 1)?
     .body(chunk1)
     .send().await?;
@@ -249,105 +241,88 @@ let part2 = bucket.upload_part("large-file.bin", &init.upload_id, 2)?
     .body(chunk2)
     .send().await?;
 
-// Copy a part from another object
+// 从其他对象拷贝分片
 let copied = bucket.upload_part_copy("large-file.bin", &init.upload_id, 3)?
     .copy_source("/other-bucket/source-key")
     .send().await?;
 
-// Complete
-let complete = bucket.complete_multipart_upload("large-file.bin", &init.upload_id)?
+// 完成上传
+bucket.complete_multipart_upload("large-file.bin", &init.upload_id)?
     .part(1, &part1.etag)
     .part(2, &part2.etag)
     .part(3, &copied.etag)
     .send().await?;
 
-// List parts
+// 列举分片
 let parts = bucket.list_parts("large-file.bin", &init.upload_id)?
-    .max_parts(100)
     .send().await?;
 
-// List all multipart uploads
-let uploads = bucket.list_multipart_uploads()
-    .max_uploads(50)
-    .send().await?;
+// 列举所有分片上传任务
+let uploads = bucket.list_multipart_uploads().send().await?;
 
-// Abort if needed
+// 中止上传
 bucket.abort_multipart_upload("large-file.bin", &init.upload_id)?
     .send().await?;
 ```
 
-## Bucket Operations
+## Bucket 操作
 
-### Create and manage
+### 创建与管理
 
 ```rust
-// Create a bucket
 bucket.create()
     .acl(BucketAcl::Private)
     .storage_class(StorageClass::Standard)
     .data_redundancy(DataRedundancyType::LRS)
     .send().await?;
 
-// Get bucket info
 let info = bucket.get_info().send().await?;
-
-// Get bucket statistics
 let stat = bucket.get_stat().send().await?;
-
-// Delete bucket
 bucket.delete().send().await?;
 ```
 
-### Access Control
+### 访问控制
 
 ```rust
 bucket.put_acl(BucketAcl::PublicRead).send().await?;
 let acl = bucket.get_acl().send().await?;
 ```
 
-### Versioning
+### 版本控制
 
 ```rust
 bucket.put_versioning("Enabled").send().await?;
 let status = bucket.get_versioning().send().await?;
 ```
 
-### Lifecycle
+### 生命周期
 
 ```rust
-let rules = vec![LifecycleRule {
-    id: Some("expire-old-logs".into()),
+bucket.put_lifecycle(vec![LifecycleRule {
+    id: Some("expire-logs".into()),
     prefix: Some("logs/".into()),
     status: LifecycleRuleStatus::Enabled,
     expiration_days: Some(30),
     expiration_date: None,
-    abort_multipart_upload_days: Some(7),
-}];
-bucket.put_lifecycle(rules).send().await?;
+    abort_multipart_upload_days: None,
+}]).send().await?;
+
 let rules = bucket.get_lifecycle().send().await?;
 bucket.delete_lifecycle().send().await?;
 ```
 
-### CORS
+### CORS、Policy、加密、网站、日志、防盗链、标签
 
 ```rust
 bucket.put_cors(vec![CorsRule {
     allowed_origins: vec!["*".into()],
-    allowed_methods: vec!["GET".into(), "PUT".into()],
+    allowed_methods: vec!["GET".into()],
     allowed_headers: vec!["*".into()],
     expose_headers: vec![],
     max_age_seconds: Some(3600),
 }]).send().await?;
 
-let rules = bucket.get_cors().send().await?;
-bucket.delete_cors().send().await?;
-```
-
-### Policy, Encryption, Website, Logging, Referer, Tags
-
-```rust
 bucket.put_policy(r#"{"Version":"1","Statement":[]}"#.into()).send().await?;
-let policy = bucket.get_policy().send().await?;
 
 bucket.put_encryption(ServerSideEncryptionConfiguration {
     sse_algorithm: "AES256".into(),
@@ -369,65 +344,58 @@ bucket.put_referer()
 
 bucket.put_tags()
     .tag("project", "aliyun-oss")
-    .tag("env", "production")
     .send().await?;
 ```
 
-## Pre-signed URLs
+## 预签名 URL
 
-Generate time-limited URLs for sharing objects without exposing credentials:
+生成有时效的下载链接，无需暴露 AccessKey：
 
 ```rust
-// Build a pre-signed GET URL (valid for 1 hour)
+// V4 预签名 GET URL（有效期 1 小时）
 let url = client
-    .presign("my-bucket", "secret-file.pdf").await
+    .presign("my-bucket", "secret-file.pdf")
     .method("GET")
     .expires(std::time::Duration::from_secs(3600))
-    .query_param("response-content-disposition", "attachment")
-    .generate()
-    .await?;
-
-println!("Download URL: {}", url);
-
-// V4 pre-signed URL
-let v4_url = client
-    .presign("my-bucket", "secret-file.pdf")
     .generate_v4()?;
+
+// V1 预签名 URL
+let url = client
+    .presign("my-bucket", "secret-file.pdf")
+    .generate_v1()?;
 ```
 
-## Service Operations
+## 服务级操作
 
 ```rust
-// List all buckets
 let buckets = client.list_buckets()?
     .prefix("my-project-")
     .max_keys(100)
-    .send()
-    .await?;
+    .send().await?;
 ```
 
-## Error Handling
+## 错误处理
 
-All fallible operations return `aliyun_oss::error::Result<T>`, which is an alias for `std::result::Result<T, OssError>`.
+所有可能失败的操作返回 `aliyun_oss::error::Result<T>`（等价于 `std::result::Result<T, OssError>`）。
 
 ```rust
 use aliyun_oss::error::{OssError, OssErrorKind};
 
 match client.bucket("my-bucket")?.get_object("key.txt")?.send().await {
-    Ok(output) => println!("Got {} bytes", output.body.len()),
+    Ok(output) => println!("获取 {} 字节", output.body.len()),
     Err(err) => match err.kind {
         OssErrorKind::ServiceError(ref se) => {
-            eprintln!("OSS error {}: {}", se.status_code, se.message);
+            eprintln!("OSS 错误 {}: {}", se.status_code, se.message);
         }
-        OssErrorKind::ValidationError => eprintln!("Invalid input"),
+        OssErrorKind::ValidationError => eprintln!("输入参数无效"),
         _ => eprintln!("{}", err),
     },
 }
 ```
 
-## Regions
+## 支持的地域
 
-Supported regions via the `Region` enum:
+通过 `Region` 枚举支持 37+ 个地域：
 
 ```rust
 use aliyun_oss::types::region::Region;
@@ -437,19 +405,18 @@ Region::CnShanghai       // oss-cn-shanghai.aliyuncs.com
 Region::CnBeijing        // oss-cn-beijing.aliyuncs.com
 Region::CnShenzhen       // oss-cn-shenzhen.aliyuncs.com
 Region::ApSingapore      // oss-ap-southeast-1.aliyuncs.com
-// ... 37+ regions supported
 
-// Custom endpoint
+// 自定义 endpoint
 Region::Custom {
     endpoint: "oss-cn-wulanchabu.aliyuncs.com".into(),
     region_id: "cn-wulanchabu".into(),
 }
 ```
 
-## Minimum Supported Rust Version
+## 最低 Rust 版本
 
-Rust **1.85+** (Edition 2024).
+Rust **1.85+** (Edition 2024)。
 
-## License
+## 许可证
 
-This project is licensed under the [MIT License](LICENSE).
+本项目采用 [MIT License](LICENSE)。
