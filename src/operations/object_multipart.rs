@@ -637,6 +637,97 @@ struct CompleteMultipartUploadResult {
     etag: String,
 }
 
+pub struct AbortMultipartUploadBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    upload_id: String,
+}
+
+impl AbortMultipartUploadBuilder {
+    pub(crate) fn new(
+        client: Arc<OSSClientInner>,
+        bucket: BucketName,
+        key: ObjectKey,
+        upload_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id: upload_id.into(),
+        }
+    }
+
+    pub async fn send(self) -> Result<AbortMultipartUploadOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+        let full_uri = format!("{}?uploadId={}", uri, self.upload_id);
+
+        let query_params: Vec<(String, String)> = vec![("uploadId".into(), self.upload_id.clone())];
+
+        let request = HttpRequest::builder()
+            .method(http::Method::DELETE)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("AbortMultipartUpload".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.status().is_success() {
+            Ok(AbortMultipartUploadOutput {
+                request_id: response
+                    .headers
+                    .get("x-oss-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("AbortMultipartUpload".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AbortMultipartUploadOutput {
+    pub request_id: String,
+}
+
 pub struct CompleteMultipartUploadBuilder {
     client: Arc<OSSClientInner>,
     bucket: BucketName,
@@ -1105,6 +1196,20 @@ impl BucketOperations {
     ) -> Result<CompleteMultipartUploadBuilder> {
         let object_key = ObjectKey::new(key.into())?;
         Ok(CompleteMultipartUploadBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+            upload_id,
+        ))
+    }
+
+    pub fn abort_multipart_upload(
+        &self,
+        key: impl Into<String>,
+        upload_id: impl Into<String>,
+    ) -> Result<AbortMultipartUploadBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(AbortMultipartUploadBuilder::new(
             self.client_inner().clone(),
             self.bucket_name().clone(),
             object_key,
@@ -1645,5 +1750,68 @@ mod tests {
             "CompleteMultipart: key={}, etag={}",
             output.key, output.etag
         );
+    }
+
+    #[tokio::test]
+    async fn abort_multipart_sends_delete_request() {
+        let (inner, requests) = create_test_inner_with_response(
+            http::StatusCode::NO_CONTENT,
+            bytes::Bytes::new(),
+            vec![],
+        );
+        let builder = AbortMultipartUploadBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("k").unwrap(),
+            "upload-123",
+        );
+
+        let output = builder.send().await.unwrap();
+        assert!(!output.request_id.is_empty());
+
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured[0].method, http::Method::DELETE);
+        assert!(captured[0].uri.contains("uploadId=upload-123"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_abort_multipart_upload() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let key = format!("test-abort-{}.bin", chrono::Utc::now().timestamp());
+        let bucket = client.bucket(&bucket_str).unwrap();
+
+        let upload_id = bucket
+            .initiate_multipart_upload(&key)
+            .unwrap()
+            .send()
+            .await
+            .unwrap()
+            .upload_id;
+
+        let output = bucket
+            .abort_multipart_upload(&key, &upload_id)
+            .unwrap()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.request_id.is_empty());
+        eprintln!("AbortMultipartUpload: key={}", key);
     }
 }
