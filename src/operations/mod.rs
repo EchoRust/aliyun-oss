@@ -4,6 +4,7 @@ pub mod bucket_cors;
 pub mod bucket_encryption;
 pub mod bucket_lifecycle;
 pub mod bucket_policy;
+pub mod bucket_versioning;
 pub mod object;
 pub mod object_acl;
 pub mod object_append;
