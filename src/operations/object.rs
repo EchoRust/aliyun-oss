@@ -493,6 +493,15 @@ impl BucketOperations {
             object_key,
         ))
     }
+
+    pub fn delete_object(&self, key: impl Into<String>) -> Result<DeleteObjectBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(DeleteObjectBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+        ))
+    }
 }
 
 pub struct GetObjectBuilder {
@@ -1130,6 +1139,116 @@ impl HeadObjectOutput {
     }
 }
 
+pub struct DeleteObjectBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    version_id: Option<String>,
+}
+
+impl DeleteObjectBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName, key: ObjectKey) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            version_id: None,
+        }
+    }
+
+    pub fn version_id(mut self, id: impl Into<String>) -> Self {
+        self.version_id = Some(id.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<DeleteObjectOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(ref vid) = self.version_id {
+            query_pairs.push(("versionId".into(), vid.clone()));
+        }
+
+        let query_string = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "{}={}",
+                        crate::util::uri::uri_encode(k),
+                        crate::util::uri::uri_encode(v)
+                    )
+                })
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::DELETE)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteObject".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.status().is_success() {
+            let request_id = response
+                .headers
+                .get("x-oss-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            Ok(DeleteObjectOutput { request_id })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteObject".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteObjectOutput {
+    pub request_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -1281,6 +1400,85 @@ mod tests {
 
         let result = builder.send().await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_object_sends_delete_request() {
+        let (inner, requests) = create_test_inner_with_response(
+            http::StatusCode::NO_CONTENT,
+            bytes::Bytes::new(),
+            vec![],
+        );
+        let bucket = BucketName::new("test-bucket").unwrap();
+        let builder = DeleteObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
+
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.request_id, "rid-001");
+
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured[0].method, http::Method::DELETE);
+    }
+
+    #[tokio::test]
+    async fn delete_object_with_version_id() {
+        let (inner, requests) = create_test_inner_with_response(
+            http::StatusCode::NO_CONTENT,
+            bytes::Bytes::new(),
+            vec![],
+        );
+        let bucket = BucketName::new("test-bucket").unwrap();
+        let builder = DeleteObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
+
+        builder.version_id("v2").send().await.unwrap();
+
+        let captured = requests.lock().unwrap();
+        assert!(captured[0].uri.contains("versionId=v2"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_delete_object() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let key = format!("test-delete-{}.txt", chrono::Utc::now().timestamp());
+        client
+            .bucket(&bucket_str)
+            .unwrap()
+            .put_object(&key)
+            .unwrap()
+            .body(bytes::Bytes::from("to be deleted"))
+            .send()
+            .await
+            .unwrap();
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .delete_object(&key)
+            .unwrap()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.request_id.is_empty());
+        eprintln!(
+            "DELETE '{}' succeeded: request_id={}",
+            key, output.request_id
+        );
     }
 
     #[tokio::test]
