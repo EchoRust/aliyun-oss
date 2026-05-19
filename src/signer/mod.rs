@@ -1,3 +1,4 @@
+pub mod presigned;
 pub mod v1;
 pub mod v4;
 

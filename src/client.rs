@@ -97,6 +97,23 @@ impl OSSClient {
         &self.inner
     }
 
+    pub fn presign(
+        &self,
+        bucket: impl Into<String>,
+        key: impl Into<String>,
+    ) -> crate::signer::presigned::PreSignedUrlBuilder {
+        let creds = tokio::runtime::Handle::current()
+            .block_on(self.inner.credentials.credentials())
+            .expect("credentials should be available for presign");
+        crate::signer::presigned::PreSignedUrlBuilder::new(
+            creds,
+            self.inner.region.region_id().to_string(),
+            self.inner.endpoint.clone(),
+            bucket.into(),
+            key.into(),
+        )
+    }
+
     pub fn bucket(&self, name: impl Into<String>) -> Result<BucketOperations> {
         let bucket = BucketName::new(name.into())?;
         Ok(BucketOperations {
