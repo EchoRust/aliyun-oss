@@ -1,5 +1,9 @@
 pub mod bucket;
 pub mod bucket_acl;
+pub mod bucket_cors;
+pub mod bucket_encryption;
+pub mod bucket_lifecycle;
+pub mod bucket_policy;
 pub mod object;
 pub mod object_acl;
 pub mod object_append;
