@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 
 use crate::config::credentials::Credentials;
