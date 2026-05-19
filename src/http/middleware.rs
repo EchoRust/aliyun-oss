@@ -111,7 +111,7 @@ impl Middleware for SigningMiddleware {
     }
 }
 
-fn extract_path(uri: &str) -> String {
+pub(crate) fn extract_path(uri: &str) -> String {
     if let Some(pos) = uri.find("://") {
         let after_scheme = &uri[pos + 3..];
         if let Some(path_start) = after_scheme.find('/') {

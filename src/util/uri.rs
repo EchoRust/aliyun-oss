@@ -17,10 +17,10 @@ pub fn oss_endpoint_url(endpoint: &str, bucket: Option<&str>, key: Option<&str>)
     match (bucket, key) {
         (Some(bucket), Some(key)) => {
             let encoded_key = uri_encode(key);
-            format!("https://{}/{}/{}", endpoint, bucket, encoded_key)
+            format!("https://{}.{}/{}", bucket, endpoint, encoded_key)
         }
         (Some(bucket), None) => {
-            format!("https://{}/{}", endpoint, bucket)
+            format!("https://{}.{}", bucket, endpoint)
         }
         (None, None) => {
             format!("https://{}", endpoint)
@@ -99,7 +99,7 @@ mod tests {
         );
         assert_eq!(
             url,
-            "https://oss-cn-hangzhou.aliyuncs.com/my-bucket/path/to/object.jpg"
+            "https://my-bucket.oss-cn-hangzhou.aliyuncs.com/path/to/object.jpg"
         );
     }
 
@@ -112,7 +112,7 @@ mod tests {
         );
         assert_eq!(
             url,
-            "https://oss-cn-hangzhou.aliyuncs.com/my-bucket/%E6%96%87%E4%BB%B6%20%E5%90%8D.jpg"
+            "https://my-bucket.oss-cn-hangzhou.aliyuncs.com/%E6%96%87%E4%BB%B6%20%E5%90%8D.jpg"
         );
     }
 
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn build_endpoint_url_with_bucket_only() {
         let url = oss_endpoint_url("oss-cn-hangzhou.aliyuncs.com", Some("my-bucket"), None);
-        assert_eq!(url, "https://oss-cn-hangzhou.aliyuncs.com/my-bucket");
+        assert_eq!(url, "https://my-bucket.oss-cn-hangzhou.aliyuncs.com");
     }
 
     #[test]
@@ -134,6 +134,7 @@ mod tests {
             oss_endpoint_url_http("oss-cn-hangzhou.aliyuncs.com", Some("bucket"), Some("key"));
         assert!(url.starts_with("http://"));
         assert!(!url.starts_with("https://"));
+        assert!(url.contains("bucket.oss-cn-hangzhou.aliyuncs.com"));
     }
 
     #[test]

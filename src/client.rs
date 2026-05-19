@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::config::credentials::{CredentialsProvider, StaticCredentialsProvider};
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
-use crate::http::client::{HttpClient, ReqwestHttpClient};
-use crate::signer::{SignVersion, Signer, create_signer};
+use crate::http::client::{HttpClient, HttpRequest, HttpResponse, ReqwestHttpClient};
+use crate::http::middleware::extract_path;
+use crate::signer::{SignVersion, Signer, SigningRequest, create_signer};
 use crate::types::bucket::BucketName;
 use crate::types::region::Region;
 
@@ -14,6 +15,64 @@ pub(crate) struct OSSClientInner {
     pub(crate) signer: Arc<dyn Signer>,
     pub(crate) region: Region,
     pub(crate) endpoint: String,
+}
+
+impl OSSClientInner {
+    pub(crate) async fn send_signed(
+        &self,
+        request: HttpRequest,
+        bucket: Option<&BucketName>,
+        query_params: Vec<(String, String)>,
+    ) -> Result<HttpResponse> {
+        let creds = self.credentials.credentials().await?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+
+        let mut headers: Vec<(String, String)> = request
+            .headers
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+
+        headers.push(("x-oss-date".to_string(), timestamp.clone()));
+
+        let path = extract_path(&request.uri);
+        let signing_uri = if let Some(bucket) = bucket {
+            format!("/{}{}", bucket.as_str(), path)
+        } else {
+            path
+        };
+
+        let mut signing_request = SigningRequest {
+            method: request.method.as_str().to_string(),
+            uri: signing_uri,
+            region: self.region.region_id().to_string(),
+            query_params,
+            headers,
+            timestamp,
+        };
+
+        self.signer.sign(&mut signing_request, &creds)?;
+
+        let mut signed_request = HttpRequest::builder()
+            .method(request.method.clone())
+            .uri(&request.uri);
+
+        for (key, value) in &signing_request.headers {
+            if let (Ok(name), Ok(val)) = (
+                http::HeaderName::from_bytes(key.as_bytes()),
+                http::HeaderValue::from_str(value),
+            ) {
+                signed_request = signed_request.header(name, val);
+            }
+        }
+
+        if let Some(body) = request.body {
+            signed_request = signed_request.body(body);
+        }
+
+        self.http.send(signed_request.build()).await
+    }
 }
 
 #[derive(Clone)]
@@ -135,13 +194,11 @@ impl OSSClientBuilder {
     }
 }
 
-#[allow(dead_code)]
 pub struct BucketOperations {
-    client: Arc<OSSClientInner>,
-    bucket: BucketName,
+    pub(crate) client: Arc<OSSClientInner>,
+    pub(crate) bucket: BucketName,
 }
 
-#[allow(dead_code)]
 impl BucketOperations {
     pub fn bucket_name(&self) -> &BucketName {
         &self.bucket

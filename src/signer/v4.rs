@@ -35,19 +35,29 @@ impl V4Signer {
         let additional_headers = self.build_additional_headers_str(request);
         let scope = format!("{}/{}/oss/aliyun_v4_request", date, request.region);
 
-        let authorization = format!(
-            "{} Credential={}/{},AdditionalHeaders={},Signature={}",
-            ALGORITHM,
-            credentials.access_key_id(),
-            scope,
-            additional_headers,
-            signature
-        );
+        let authorization = if additional_headers.is_empty() {
+            format!(
+                "{} Credential={}/{},Signature={}",
+                ALGORITHM,
+                credentials.access_key_id(),
+                scope,
+                signature
+            )
+        } else {
+            format!(
+                "{} Credential={}/{},AdditionalHeaders={},Signature={}",
+                ALGORITHM,
+                credentials.access_key_id(),
+                scope,
+                additional_headers,
+                signature
+            )
+        };
 
         Ok(authorization)
     }
 
-    fn build_canonical_request(&self, request: &SigningRequest) -> String {
+    pub(crate) fn build_canonical_request(&self, request: &SigningRequest) -> String {
         let http_verb = request.method;
         let canonical_uri = uri_encode(request.uri);
         let canonical_query = self.build_canonical_query_string(request);
