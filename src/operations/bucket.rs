@@ -141,12 +141,208 @@ impl BucketOperations {
     pub fn create(&self) -> PutBucketBuilder {
         PutBucketBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
     }
+
+    pub fn delete(&self) -> DeleteBucketBuilder {
+        DeleteBucketBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
+
+    pub fn get_info(&self) -> GetBucketInfoBuilder {
+        GetBucketInfoBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
+}
+
+pub struct DeleteBucketBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+}
+
+impl DeleteBucketBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self { client, bucket }
+    }
+
+    pub async fn send(self) -> Result<DeleteBucketOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = format!("https://{}.{}", self.bucket.as_str(), endpoint);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::DELETE)
+            .uri(&uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), Vec::new())
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteBucket".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.status().is_success() {
+            Ok(DeleteBucketOutput {
+                request_id: response
+                    .headers
+                    .get("x-oss-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteBucket".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteBucketOutput {
+    pub request_id: String,
+}
+
+pub struct GetBucketInfoBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+}
+
+impl GetBucketInfoBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self { client, bucket }
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::GetBucketInfoOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = format!("https://{}.{}?bucketInfo", self.bucket.as_str(), endpoint);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&uri)
+            .build();
+
+        let query_params = vec![("bucketInfo".into(), "".into())];
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("GetBucketInfo".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("GetBucketInfo".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+    use std::sync::Mutex;
+
+    use crate::client::OSSClientInner;
+    use crate::config::credentials::Credentials;
+    use crate::http::client::{HttpClient, HttpRequest, HttpResponse};
+
     use super::*;
     use crate::util::xml::to_xml;
+
+    struct RecordingHttpClient {
+        requests: Arc<Mutex<Vec<HttpRequest>>>,
+        response_status: http::StatusCode,
+        response_body: bytes::Bytes,
+    }
+
+    #[async_trait::async_trait]
+    impl HttpClient for RecordingHttpClient {
+        async fn send(&self, request: HttpRequest) -> crate::error::Result<HttpResponse> {
+            self.requests.lock().unwrap().push(request);
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                "x-oss-request-id",
+                http::HeaderValue::from_static("rid-bucket"),
+            );
+            Ok(HttpResponse {
+                status: self.response_status,
+                headers,
+                body: self.response_body.clone(),
+            })
+        }
+    }
+
+    fn create_test_inner(
+        status: http::StatusCode,
+        body: bytes::Bytes,
+    ) -> (Arc<OSSClientInner>, Arc<Mutex<Vec<HttpRequest>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let http = Arc::new(RecordingHttpClient {
+            requests: requests.clone(),
+            response_status: status,
+            response_body: body,
+        });
+        let credentials = Arc::new(crate::config::credentials::StaticCredentialsProvider::new(
+            Credentials::builder()
+                .access_key_id("test-ak")
+                .access_key_secret("test-sk")
+                .build()
+                .unwrap(),
+        ));
+        let inner = Arc::new(OSSClientInner {
+            http,
+            credentials,
+            signer: Arc::from(crate::signer::create_signer(crate::signer::SignVersion::V4)),
+            region: crate::types::region::Region::CnHangzhou,
+            endpoint: "oss-cn-hangzhou.aliyuncs.com".into(),
+        });
+        (inner, requests)
+    }
 
     #[test]
     fn put_bucket_builder_generates_correct_xml_body() {
@@ -178,5 +374,81 @@ mod tests {
         };
         let xml = to_xml(&config).unwrap();
         assert!(xml.contains("CreateBucketConfiguration"));
+    }
+
+    #[tokio::test]
+    async fn delete_bucket_sends_delete_request() {
+        let (inner, requests) =
+            create_test_inner(http::StatusCode::NO_CONTENT, bytes::Bytes::new());
+        let builder = DeleteBucketBuilder::new(inner, BucketName::new("test-bucket").unwrap());
+
+        builder.send().await.unwrap();
+
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured[0].method, http::Method::DELETE);
+    }
+
+    #[tokio::test]
+    async fn get_bucket_info_parses_response() {
+        let info_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<BucketInfo>
+  <Bucket>
+    <Name>test-bucket</Name>
+    <CreationDate>2024-01-01T00:00:00.000Z</CreationDate>
+    <Location>oss-cn-hangzhou</Location>
+    <StorageClass>Standard</StorageClass>
+    <ExtranetEndpoint>test-bucket.oss-cn-hangzhou.aliyuncs.com</ExtranetEndpoint>
+    <IntranetEndpoint>test-bucket.oss-cn-hangzhou-internal.aliyuncs.com</IntranetEndpoint>
+    <Owner>
+      <ID>owner-id</ID>
+    </Owner>
+  </Bucket>
+</BucketInfo>"#;
+
+        let (inner, requests) =
+            create_test_inner(http::StatusCode::OK, bytes::Bytes::from(info_xml));
+        let builder = GetBucketInfoBuilder::new(inner, BucketName::new("test-bucket").unwrap());
+
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.bucket.name, "test-bucket");
+
+        let captured = requests.lock().unwrap();
+        assert!(captured[0].uri.contains("bucketInfo"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_get_bucket_info() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = crate::types::region::Region::from_str(&region_str).unwrap_or_else(|_| {
+            crate::types::region::Region::Custom {
+                endpoint: format!("oss-{}.aliyuncs.com", region_str),
+                region_id: region_str.clone(),
+            }
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .get_info()
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(output.bucket.name, bucket_str);
+        eprintln!(
+            "GetBucketInfo: name={}, location={}, storage={}",
+            output.bucket.name, output.bucket.location, output.bucket.storage_class
+        );
     }
 }
