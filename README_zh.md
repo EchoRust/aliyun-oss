@@ -4,7 +4,7 @@
 [![Docs.rs](https://docs.rs/aliyun-oss/badge.svg)](https://docs.rs/aliyun-oss)
 [![License](https://img.shields.io/crates/l/aliyun-oss.svg)](LICENSE)
 
-[阿里云对象存储 OSS](https://www.aliyun.com/product/oss) 的 Rust 原生异步 SDK。类型安全、全异步、覆盖 80+ API 操作。
+[阿里云对象存储 OSS](https://help.aliyun.com/zh/oss) 的 Rust 原生异步 SDK。类型安全、全异步、覆盖 80+ API 操作。
 
 ## 特性
 

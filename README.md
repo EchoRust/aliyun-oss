@@ -4,7 +4,7 @@
 [![Docs.rs](https://docs.rs/aliyun-oss/badge.svg)](https://docs.rs/aliyun-oss)
 [![License](https://img.shields.io/crates/l/aliyun-oss.svg)](LICENSE)
 
-A fully async, type-safe Rust SDK for [Alibaba Cloud Object Storage Service (OSS)](https://www.aliyun.com/product/oss).
+A fully async, type-safe Rust SDK for [Alibaba Cloud Object Storage Service (OSS)](https://help.aliyun.com/zh/oss).
 
 ## Features
 
