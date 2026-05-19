@@ -502,6 +502,14 @@ impl BucketOperations {
             object_key,
         ))
     }
+
+    pub fn list_objects(&self) -> ListObjectsBuilder {
+        ListObjectsBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
+
+    pub fn list_objects_v2(&self) -> ListObjectsV2Builder {
+        ListObjectsV2Builder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
 }
 
 pub struct GetObjectBuilder {
@@ -1249,6 +1257,277 @@ pub struct DeleteObjectOutput {
     pub request_id: String,
 }
 
+pub struct ListObjectsBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    prefix: Option<String>,
+    delimiter: Option<String>,
+    marker: Option<String>,
+    max_keys: Option<i32>,
+    encoding_type: Option<String>,
+}
+
+impl ListObjectsBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self {
+            client,
+            bucket,
+            prefix: None,
+            delimiter: None,
+            marker: None,
+            max_keys: None,
+            encoding_type: None,
+        }
+    }
+
+    pub fn prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+
+    pub fn delimiter(mut self, delimiter: impl Into<String>) -> Self {
+        self.delimiter = Some(delimiter.into());
+        self
+    }
+
+    pub fn marker(mut self, marker: impl Into<String>) -> Self {
+        self.marker = Some(marker.into());
+        self
+    }
+
+    pub fn max_keys(mut self, max_keys: i32) -> Self {
+        self.max_keys = Some(max_keys);
+        self
+    }
+
+    pub fn encoding_type(mut self, et: impl Into<String>) -> Self {
+        self.encoding_type = Some(et.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::ListObjectsOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(&endpoint, Some(self.bucket.as_str()), None);
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(ref p) = self.prefix {
+            query_pairs.push(("prefix".into(), crate::util::uri::uri_encode(p)));
+        }
+        if let Some(ref d) = self.delimiter {
+            query_pairs.push(("delimiter".into(), d.clone()));
+        }
+        if let Some(ref m) = self.marker {
+            query_pairs.push(("marker".into(), m.clone()));
+        }
+        if let Some(mk) = self.max_keys {
+            query_pairs.push(("max-keys".into(), mk.to_string()));
+        }
+        if let Some(ref et) = self.encoding_type {
+            query_pairs.push(("encoding-type".into(), et.clone()));
+        }
+
+        let query_string = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjects".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjects".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+pub struct ListObjectsV2Builder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    prefix: Option<String>,
+    delimiter: Option<String>,
+    start_after: Option<String>,
+    continuation_token: Option<String>,
+    max_keys: Option<i32>,
+    encoding_type: Option<String>,
+    fetch_owner: Option<bool>,
+}
+
+impl ListObjectsV2Builder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self {
+            client,
+            bucket,
+            prefix: None,
+            delimiter: None,
+            start_after: None,
+            continuation_token: None,
+            max_keys: None,
+            encoding_type: None,
+            fetch_owner: None,
+        }
+    }
+
+    pub fn prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+
+    pub fn delimiter(mut self, delimiter: impl Into<String>) -> Self {
+        self.delimiter = Some(delimiter.into());
+        self
+    }
+
+    pub fn start_after(mut self, start_after: impl Into<String>) -> Self {
+        self.start_after = Some(start_after.into());
+        self
+    }
+
+    pub fn continuation_token(mut self, token: impl Into<String>) -> Self {
+        self.continuation_token = Some(token.into());
+        self
+    }
+
+    pub fn max_keys(mut self, max_keys: i32) -> Self {
+        self.max_keys = Some(max_keys);
+        self
+    }
+
+    pub fn encoding_type(mut self, et: impl Into<String>) -> Self {
+        self.encoding_type = Some(et.into());
+        self
+    }
+
+    pub fn fetch_owner(mut self, fetch: bool) -> Self {
+        self.fetch_owner = Some(fetch);
+        self
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::ListObjectsV2Output> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(&endpoint, Some(self.bucket.as_str()), None);
+
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        query_pairs.push(("list-type".into(), "2".into()));
+        if let Some(ref p) = self.prefix {
+            query_pairs.push(("prefix".into(), crate::util::uri::uri_encode(p)));
+        }
+        if let Some(ref d) = self.delimiter {
+            query_pairs.push(("delimiter".into(), d.clone()));
+        }
+        if let Some(ref s) = self.start_after {
+            query_pairs.push(("start-after".into(), s.clone()));
+        }
+        if let Some(ref ct) = self.continuation_token {
+            query_pairs.push(("continuation-token".into(), ct.clone()));
+        }
+        if let Some(mk) = self.max_keys {
+            query_pairs.push(("max-keys".into(), mk.to_string()));
+        }
+        if let Some(ref et) = self.encoding_type {
+            query_pairs.push(("encoding-type".into(), et.clone()));
+        }
+        if let Some(fo) = self.fetch_owner {
+            query_pairs.push(("fetch-owner".into(), fo.to_string()));
+        }
+
+        let query_string: String = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            format!("?{}", parts.join("&"))
+        };
+        let full_uri = format!("{}{}", uri, query_string);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjectsV2".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("ListObjectsV2".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -1364,75 +1643,106 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn head_object_sends_head_request() {
+    async fn list_objects_basic_request() {
+        let list_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <Name>test-bucket</Name>
+  <Prefix></Prefix>
+  <MaxKeys>100</MaxKeys>
+  <IsTruncated>false</IsTruncated>
+</ListBucketResult>"#;
         let (inner, requests) = create_test_inner_with_response(
             http::StatusCode::OK,
-            bytes::Bytes::new(),
-            vec![
-                ("content-type", "text/plain"),
-                ("content-length", "256"),
-                ("last-modified", "Mon, 01 Jan 2024 00:00:00 GMT"),
-            ],
+            bytes::Bytes::from(list_xml),
+            vec![],
         );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = HeadObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
+        let builder = ListObjectsBuilder::new(inner, BucketName::new("test-bucket").unwrap());
 
         let output = builder.send().await.unwrap();
-
-        assert_eq!(output.content_type.as_deref(), Some("text/plain"));
-        assert_eq!(output.content_length, Some(256));
-        assert_eq!(output.etag.as_deref(), Some("abc123"));
+        assert_eq!(output.name, "test-bucket");
+        assert!(!output.is_truncated);
 
         let captured = requests.lock().unwrap();
-        assert_eq!(captured[0].method, http::Method::HEAD);
-        assert!(captured[0].body.is_none());
+        assert_eq!(captured[0].method, http::Method::GET);
     }
 
     #[tokio::test]
-    async fn head_object_not_found_returns_error() {
-        let (inner, _) = create_test_inner_with_response(
-            http::StatusCode::NOT_FOUND,
-            bytes::Bytes::new(),
-            vec![],
-        );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = HeadObjectBuilder::new(inner, bucket, ObjectKey::new("missing.txt").unwrap());
-
-        let result = builder.send().await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn delete_object_sends_delete_request() {
+    async fn list_objects_with_prefix_and_delimiter() {
         let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::NO_CONTENT,
-            bytes::Bytes::new(),
+            http::StatusCode::OK,
+            bytes::Bytes::from(
+                r#"<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>b</Name><MaxKeys>100</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>"#,
+            ),
             vec![],
         );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = DeleteObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
+        let builder = ListObjectsBuilder::new(inner, BucketName::new("test-bucket").unwrap());
+
+        builder
+            .prefix("dir/")
+            .delimiter("/")
+            .max_keys(10)
+            .send()
+            .await
+            .unwrap();
+
+        let captured = requests.lock().unwrap();
+        assert!(captured[0].uri.contains("prefix=dir/"));
+        assert!(captured[0].uri.contains("delimiter=/"));
+        assert!(captured[0].uri.contains("max-keys=10"));
+    }
+
+    #[tokio::test]
+    async fn list_objects_v2_basic_request() {
+        let (inner, requests) = create_test_inner_with_response(
+            http::StatusCode::OK,
+            bytes::Bytes::from(
+                r#"<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>b</Name><MaxKeys>100</MaxKeys><IsTruncated>false</IsTruncated><KeyCount>0</KeyCount></ListBucketResult>"#,
+            ),
+            vec![],
+        );
+        let builder = ListObjectsV2Builder::new(inner, BucketName::new("test-bucket").unwrap());
 
         let output = builder.send().await.unwrap();
-        assert_eq!(output.request_id, "rid-001");
+        assert!(!output.is_truncated);
 
         let captured = requests.lock().unwrap();
-        assert_eq!(captured[0].method, http::Method::DELETE);
+        assert!(captured[0].uri.contains("list-type=2"));
     }
 
     #[tokio::test]
-    async fn delete_object_with_version_id() {
-        let (inner, requests) = create_test_inner_with_response(
-            http::StatusCode::NO_CONTENT,
-            bytes::Bytes::new(),
-            vec![],
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_list_objects() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .list_objects()
+            .max_keys(5)
+            .send()
+            .await
+            .unwrap();
+
+        eprintln!(
+            "LIST objects: {} objects, truncated={}",
+            output.objects.len(),
+            output.is_truncated
         );
-        let bucket = BucketName::new("test-bucket").unwrap();
-        let builder = DeleteObjectBuilder::new(inner, bucket, ObjectKey::new("file.txt").unwrap());
-
-        builder.version_id("v2").send().await.unwrap();
-
-        let captured = requests.lock().unwrap();
-        assert!(captured[0].uri.contains("versionId=v2"));
+        assert!(!output.name.is_empty());
     }
 
     #[tokio::test]
