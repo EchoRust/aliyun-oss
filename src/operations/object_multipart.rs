@@ -423,6 +423,183 @@ pub struct InitiateMultipartUploadOutput {
     pub upload_id: String,
 }
 
+pub struct UploadPartBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    upload_id: String,
+    part_number: u32,
+    body: Option<bytes::Bytes>,
+    content_md5: Option<String>,
+}
+
+impl UploadPartBuilder {
+    pub(crate) fn new(
+        client: Arc<OSSClientInner>,
+        bucket: BucketName,
+        key: ObjectKey,
+        upload_id: impl Into<String>,
+        part_number: u32,
+    ) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id: upload_id.into(),
+            part_number,
+            body: None,
+            content_md5: None,
+        }
+    }
+
+    pub fn body(mut self, body: impl Into<bytes::Bytes>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    pub fn content_md5(mut self, md5: impl Into<String>) -> Self {
+        self.content_md5 = Some(md5.into());
+        self
+    }
+
+    pub(crate) fn compute_md5(body: &[u8]) -> String {
+        use md5::{Digest, Md5};
+        let digest = Md5::digest(body);
+        base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            digest.as_slice(),
+        )
+    }
+
+    pub async fn send(self) -> Result<UploadPartOutput> {
+        let body = self.body.ok_or_else(|| OssError {
+            kind: OssErrorKind::ValidationError,
+            context: Box::new(ErrorContext {
+                operation: Some("UploadPart: body is required".into()),
+                bucket: Some(self.bucket.to_string()),
+                object_key: Some(self.key.to_string()),
+                ..Default::default()
+            }),
+            source: None,
+        })?;
+
+        if self.part_number < 1 || self.part_number > 10000 {
+            return Err(OssError {
+                kind: OssErrorKind::ValidationError,
+                context: Box::new(ErrorContext {
+                    operation: Some("UploadPart: part_number must be 1..=10000".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            });
+        }
+
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+        let full_uri = format!(
+            "{}?partNumber={}&uploadId={}",
+            uri, self.part_number, self.upload_id
+        );
+
+        let query_params: Vec<(String, String)> = vec![
+            ("partNumber".into(), self.part_number.to_string()),
+            ("uploadId".into(), self.upload_id.clone()),
+        ];
+
+        let mut req = HttpRequest::builder()
+            .method(http::Method::PUT)
+            .uri(&full_uri);
+
+        let md5_value = self.content_md5.unwrap_or_else(|| Self::compute_md5(&body));
+        req = req.header(
+            http::HeaderName::from_static("content-md5"),
+            http::HeaderValue::from_str(&md5_value).map_err(|e| OssError {
+                kind: OssErrorKind::ValidationError,
+                context: Box::new(ErrorContext {
+                    operation: Some("set content-md5 header".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?,
+        );
+
+        let request = req.body(body).build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("UploadPart".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let request_id = response
+                .headers
+                .get("x-oss-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            let etag = response
+                .headers
+                .get("ETag")
+                .or_else(|| response.headers.get("etag"))
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default();
+
+            Ok(UploadPartOutput {
+                request_id,
+                etag,
+                part_number: self.part_number,
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("UploadPart".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadPartOutput {
+    pub request_id: String,
+    pub etag: String,
+    pub part_number: u32,
+}
+
 impl BucketOperations {
     pub fn initiate_multipart_upload(
         &self,
@@ -433,6 +610,22 @@ impl BucketOperations {
             self.client_inner().clone(),
             self.bucket_name().clone(),
             object_key,
+        ))
+    }
+
+    pub fn upload_part(
+        &self,
+        key: impl Into<String>,
+        upload_id: impl Into<String>,
+        part_number: u32,
+    ) -> Result<UploadPartBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(UploadPartBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+            upload_id,
+            part_number,
         ))
     }
 }
@@ -634,6 +827,118 @@ mod tests {
         eprintln!(
             "InitiateMultipartUpload: key={}, upload_id={}",
             output.key, output.upload_id
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_part_builder_rejects_part_number_zero() {
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::new(), vec![]);
+        let builder = UploadPartBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("k").unwrap(),
+            "upload-id",
+            0,
+        )
+        .body(bytes::Bytes::from("data"));
+        let result = builder.send().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn upload_part_builder_rejects_part_number_over_10000() {
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::new(), vec![]);
+        let builder = UploadPartBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("k").unwrap(),
+            "upload-id",
+            10001,
+        )
+        .body(bytes::Bytes::from("data"));
+        let result = builder.send().await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn content_md5_computation_known_answer() {
+        let body = b"hello world";
+        let md5 = UploadPartBuilder::compute_md5(body);
+        assert_eq!(md5, "XrY7u+Ae7tCTyyK7j1rNww==");
+    }
+
+    #[tokio::test]
+    async fn upload_part_returns_etag_from_response() {
+        let (inner, requests) = create_test_inner_with_response(
+            http::StatusCode::OK,
+            bytes::Bytes::new(),
+            vec![("ETag", "\"abc123\"")],
+        );
+        let builder = UploadPartBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("test-key.txt").unwrap(),
+            "upload-123",
+            1,
+        )
+        .body(bytes::Bytes::from("part data"));
+
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.etag, "abc123");
+        assert_eq!(output.part_number, 1);
+
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured[0].method, http::Method::PUT);
+        assert!(captured[0].uri.contains("partNumber=1"));
+        assert!(captured[0].uri.contains("uploadId=upload-123"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_upload_part() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let key = format!("test-part-{}.bin", chrono::Utc::now().timestamp());
+        let upload_id = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .initiate_multipart_upload(&key)
+            .unwrap()
+            .send()
+            .await
+            .unwrap()
+            .upload_id;
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .upload_part(&key, &upload_id, 1)
+            .unwrap()
+            .body(bytes::Bytes::from("hello part"))
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.etag.is_empty());
+        eprintln!(
+            "UploadPart: part_number={}, etag={}",
+            output.part_number, output.etag
         );
     }
 }
