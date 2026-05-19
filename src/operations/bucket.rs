@@ -149,6 +149,10 @@ impl BucketOperations {
     pub fn get_info(&self) -> GetBucketInfoBuilder {
         GetBucketInfoBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
     }
+
+    pub fn get_stat(&self) -> GetBucketStatBuilder {
+        GetBucketStatBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
+    }
 }
 
 pub struct DeleteBucketBuilder {
@@ -273,6 +277,66 @@ impl GetBucketInfoBuilder {
                 })),
                 context: Box::new(ErrorContext {
                     operation: Some("GetBucketInfo".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+pub struct GetBucketStatBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+}
+
+impl GetBucketStatBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName) -> Self {
+        Self { client, bucket }
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::GetBucketStatOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = format!("https://{}.{}?stat", self.bucket.as_str(), endpoint);
+        let query_params: Vec<(String, String)> = vec![("stat".into(), String::new())];
+
+        let request = HttpRequest::builder()
+            .method(http::Method::GET)
+            .uri(&uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("GetBucketStat".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("GetBucketStat".into()),
                     bucket: Some(self.bucket.to_string()),
                     ..Default::default()
                 }),
