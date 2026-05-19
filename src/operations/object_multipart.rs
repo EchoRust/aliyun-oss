@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::client::{BucketOperations, OSSClientInner};
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
@@ -609,6 +609,181 @@ struct CopyPartResult {
     last_modified: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "CompleteMultipartUpload")]
+struct CompleteMultipartUpload {
+    #[serde(rename = "Part")]
+    parts: Vec<UploadPartItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UploadPartItem {
+    #[serde(rename = "PartNumber")]
+    part_number: i32,
+    #[serde(rename = "ETag")]
+    etag: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename = "CompleteMultipartUploadResult")]
+struct CompleteMultipartUploadResult {
+    #[serde(rename = "Location")]
+    location: String,
+    #[serde(rename = "Bucket")]
+    bucket: String,
+    #[serde(rename = "Key")]
+    key: String,
+    #[serde(rename = "ETag")]
+    etag: String,
+}
+
+pub struct CompleteMultipartUploadBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    upload_id: String,
+    parts: Vec<(i32, String)>,
+}
+
+impl CompleteMultipartUploadBuilder {
+    pub(crate) fn new(
+        client: Arc<OSSClientInner>,
+        bucket: BucketName,
+        key: ObjectKey,
+        upload_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id: upload_id.into(),
+            parts: Vec::new(),
+        }
+    }
+
+    pub fn part(mut self, part_number: i32, etag: impl Into<String>) -> Self {
+        self.parts.push((part_number, etag.into()));
+        self
+    }
+
+    pub async fn send(self) -> Result<CompleteMultipartUploadOutput> {
+        if self.parts.is_empty() {
+            return Err(OssError {
+                kind: OssErrorKind::ValidationError,
+                context: Box::new(ErrorContext {
+                    operation: Some("CompleteMultipartUpload: at least one part required".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            });
+        }
+
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+        let full_uri = format!("{}?uploadId={}", uri, self.upload_id);
+
+        let query_params: Vec<(String, String)> = vec![("uploadId".into(), self.upload_id.clone())];
+
+        let complete_xml = CompleteMultipartUpload {
+            parts: self
+                .parts
+                .iter()
+                .map(|(n, e)| UploadPartItem {
+                    part_number: *n,
+                    etag: e.clone(),
+                })
+                .collect(),
+        };
+        let body_xml = crate::util::xml::to_xml(&complete_xml)?;
+
+        let request = HttpRequest::builder()
+            .method(http::Method::POST)
+            .uri(&full_uri)
+            .body(bytes::Bytes::from(body_xml))
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("CompleteMultipartUpload".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let request_id = response
+                .headers
+                .get("x-oss-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            let body_str = response.body_as_str().unwrap_or("");
+            let result: CompleteMultipartUploadResult = crate::util::xml::from_xml(body_str)
+                .map_err(|e| OssError {
+                    kind: OssErrorKind::DeserializationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("CompleteMultipartUpload: parse XML".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?;
+
+            Ok(CompleteMultipartUploadOutput {
+                request_id,
+                bucket: result.bucket,
+                key: result.key,
+                location: result.location,
+                etag: result.etag.trim_matches('"').to_string(),
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("CompleteMultipartUpload".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteMultipartUploadOutput {
+    pub request_id: String,
+    pub bucket: String,
+    pub key: String,
+    pub location: String,
+    pub etag: String,
+}
+
 pub struct UploadPartCopyBuilder {
     client: Arc<OSSClientInner>,
     bucket: BucketName,
@@ -920,6 +1095,20 @@ impl BucketOperations {
             object_key,
             upload_id,
             part_number,
+        ))
+    }
+
+    pub fn complete_multipart_upload(
+        &self,
+        key: impl Into<String>,
+        upload_id: impl Into<String>,
+    ) -> Result<CompleteMultipartUploadBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(CompleteMultipartUploadBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+            upload_id,
         ))
     }
 }
@@ -1338,5 +1527,123 @@ mod tests {
 
         assert!(!output.etag.is_empty());
         eprintln!("UploadPartCopy: etag={}", output.etag);
+    }
+
+    #[test]
+    fn complete_multipart_xml_contains_parts() {
+        let complete = CompleteMultipartUpload {
+            parts: vec![
+                UploadPartItem {
+                    part_number: 1,
+                    etag: "etag1".into(),
+                },
+                UploadPartItem {
+                    part_number: 2,
+                    etag: "etag2".into(),
+                },
+            ],
+        };
+        let xml = crate::util::xml::to_xml(&complete).unwrap();
+        assert!(xml.contains("<PartNumber>1</PartNumber>"));
+        assert!(xml.contains("<ETag>etag1</ETag>"));
+        assert!(xml.contains("<PartNumber>2</PartNumber>"));
+        assert!(xml.contains("<ETag>etag2</ETag>"));
+    }
+
+    #[tokio::test]
+    async fn complete_multipart_requires_at_least_one_part() {
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::new(), vec![]);
+        let builder = CompleteMultipartUploadBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("k").unwrap(),
+            "upload-id",
+        );
+        let result = builder.send().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn complete_multipart_parses_result_xml() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUploadResult>
+  <Location>http://bucket.oss-cn-hangzhou.aliyuncs.com/key</Location>
+  <Bucket>bucket</Bucket>
+  <Key>key</Key>
+  <ETag>"final-etag"</ETag>
+</CompleteMultipartUploadResult>"#;
+        let (inner, requests) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::from(xml), vec![]);
+        let builder = CompleteMultipartUploadBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("key").unwrap(),
+            "upload-id",
+        )
+        .part(1, "etag1");
+
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.etag, "final-etag");
+        assert_eq!(output.bucket, "bucket");
+        assert_eq!(output.key, "key");
+
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured[0].method, http::Method::POST);
+        assert!(captured[0].uri.contains("uploadId=upload-id"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_complete_multipart_upload() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let key = format!("test-complete-{}.bin", chrono::Utc::now().timestamp());
+        let bucket = client.bucket(&bucket_str).unwrap();
+
+        let upload_id = bucket
+            .initiate_multipart_upload(&key)
+            .unwrap()
+            .send()
+            .await
+            .unwrap()
+            .upload_id;
+
+        let part = bucket
+            .upload_part(&key, &upload_id, 1)
+            .unwrap()
+            .body(bytes::Bytes::from("hello"))
+            .send()
+            .await
+            .unwrap();
+
+        let output = bucket
+            .complete_multipart_upload(&key, &upload_id)
+            .unwrap()
+            .part(1, &part.etag)
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.etag.is_empty());
+        assert_eq!(output.key, key);
+        eprintln!(
+            "CompleteMultipart: key={}, etag={}",
+            output.key, output.etag
+        );
     }
 }
