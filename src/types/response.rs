@@ -286,6 +286,25 @@ pub struct AccessControlPolicyDetail {
     pub grant: String,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename = "DeleteResult")]
+pub struct DeleteResult {
+    #[serde(rename = "Deleted", default)]
+    pub deleted: Vec<DeletedObject>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct DeletedObject {
+    #[serde(rename = "Key")]
+    pub key: String,
+    #[serde(rename = "DeleteMarker", default)]
+    pub delete_marker: bool,
+    #[serde(rename = "DeleteMarkerVersionId", default)]
+    pub delete_marker_version_id: String,
+    #[serde(rename = "VersionId", default)]
+    pub version_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -510,6 +510,23 @@ impl BucketOperations {
     pub fn list_objects_v2(&self) -> ListObjectsV2Builder {
         ListObjectsV2Builder::new(self.client_inner().clone(), self.bucket_name().clone())
     }
+
+    pub fn get_object_meta(&self, key: impl Into<String>) -> Result<GetObjectMetaBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(GetObjectMetaBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+        ))
+    }
+
+    pub fn delete_multiple_objects(&self, keys: Vec<String>) -> DeleteMultipleObjectsBuilder {
+        DeleteMultipleObjectsBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            keys,
+        )
+    }
 }
 
 pub struct GetObjectBuilder {
@@ -1528,6 +1545,169 @@ impl ListObjectsV2Builder {
     }
 }
 
+pub struct GetObjectMetaBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    version_id: Option<String>,
+}
+
+impl GetObjectMetaBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName, key: ObjectKey) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            version_id: None,
+        }
+    }
+
+    pub fn version_id(mut self, id: impl Into<String>) -> Self {
+        self.version_id = Some(id.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<HeadObjectOutput> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+
+        let query_pairs: Vec<(String, String)> = vec![("objectMeta".into(), String::new())];
+
+        let full_uri = format!("{}?objectMeta", uri);
+
+        let request = HttpRequest::builder()
+            .method(http::Method::HEAD)
+            .uri(&full_uri)
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("GetObjectMeta".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            Ok(HeadObjectOutput::from_response(&response))
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("GetObjectMeta".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+pub struct DeleteMultipleObjectsBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    keys: Vec<String>,
+    quiet: bool,
+}
+
+impl DeleteMultipleObjectsBuilder {
+    pub(crate) fn new(client: Arc<OSSClientInner>, bucket: BucketName, keys: Vec<String>) -> Self {
+        Self {
+            client,
+            bucket,
+            keys,
+            quiet: false,
+        }
+    }
+
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
+    pub async fn send(self) -> Result<crate::types::response::DeleteResult> {
+        let endpoint = self.client.endpoint.clone();
+        let uri = format!("https://{}.{}/?delete", self.bucket.as_str(), endpoint);
+
+        let mut objects_xml = String::new();
+        for key in &self.keys {
+            objects_xml.push_str(&format!("<Object><Key>{}</Key></Object>", key));
+        }
+        let body_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><Delete><Quiet>{}</Quiet>{}</Delete>"#,
+            self.quiet, objects_xml
+        );
+
+        let query_pairs: Vec<(String, String)> = vec![("delete".into(), String::new())];
+
+        let request = HttpRequest::builder()
+            .method(http::Method::POST)
+            .uri(&uri)
+            .body(bytes::Bytes::from(body_xml))
+            .build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_pairs)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteMultipleObjects".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let body_str = response.body_as_str().unwrap_or("");
+            Ok(crate::util::xml::from_xml(body_str)?)
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.bucket.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("DeleteMultipleObjects".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -1947,5 +2127,87 @@ mod tests {
             "PUT '{}' succeeded: request_id={}, etag={}",
             key, output.request_id, output.etag
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_get_object_meta() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .get_object_meta("test.txt")
+            .unwrap()
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.request_id.is_empty());
+        assert!(output.content_length.unwrap() > 0);
+        eprintln!(
+            "GetObjectMeta 'test.txt' OK: length={:?}",
+            output.content_length
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_delete_multiple_objects() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let key1 = format!("test-batch-del-1-{}.txt", chrono::Utc::now().timestamp());
+        let key2 = format!("test-batch-del-2-{}.txt", chrono::Utc::now().timestamp());
+
+        for k in &[key1.as_str(), key2.as_str()] {
+            client
+                .bucket(&bucket_str)
+                .unwrap()
+                .put_object(*k)
+                .unwrap()
+                .body(bytes::Bytes::from("data"))
+                .send()
+                .await
+                .unwrap();
+        }
+
+        let result = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .delete_multiple_objects(vec![key1.clone(), key2.clone()])
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(result.deleted.len(), 2);
+        eprintln!("DeleteMultiple: {} objects deleted", result.deleted.len());
     }
 }
