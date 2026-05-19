@@ -600,6 +600,284 @@ pub struct UploadPartOutput {
     pub part_number: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename = "CopyPartResult")]
+struct CopyPartResult {
+    #[serde(rename = "ETag")]
+    etag: String,
+    #[serde(rename = "LastModified")]
+    last_modified: String,
+}
+
+pub struct UploadPartCopyBuilder {
+    client: Arc<OSSClientInner>,
+    bucket: BucketName,
+    key: ObjectKey,
+    upload_id: String,
+    part_number: u32,
+    copy_source: Option<String>,
+    copy_source_range: Option<String>,
+    copy_source_if_match: Option<String>,
+    copy_source_if_none_match: Option<String>,
+    copy_source_if_modified_since: Option<String>,
+    copy_source_if_unmodified_since: Option<String>,
+}
+
+impl UploadPartCopyBuilder {
+    pub(crate) fn new(
+        client: Arc<OSSClientInner>,
+        bucket: BucketName,
+        key: ObjectKey,
+        upload_id: impl Into<String>,
+        part_number: u32,
+    ) -> Self {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id: upload_id.into(),
+            part_number,
+            copy_source: None,
+            copy_source_range: None,
+            copy_source_if_match: None,
+            copy_source_if_none_match: None,
+            copy_source_if_modified_since: None,
+            copy_source_if_unmodified_since: None,
+        }
+    }
+
+    pub fn copy_source(mut self, source: impl Into<String>) -> Self {
+        self.copy_source = Some(source.into());
+        self
+    }
+
+    pub fn copy_source_range(mut self, range: impl Into<String>) -> Self {
+        self.copy_source_range = Some(range.into());
+        self
+    }
+
+    pub fn copy_source_if_match(mut self, etag: impl Into<String>) -> Self {
+        self.copy_source_if_match = Some(etag.into());
+        self
+    }
+
+    pub fn copy_source_if_none_match(mut self, etag: impl Into<String>) -> Self {
+        self.copy_source_if_none_match = Some(etag.into());
+        self
+    }
+
+    pub fn copy_source_if_modified_since(mut self, time: impl Into<String>) -> Self {
+        self.copy_source_if_modified_since = Some(time.into());
+        self
+    }
+
+    pub fn copy_source_if_unmodified_since(mut self, time: impl Into<String>) -> Self {
+        self.copy_source_if_unmodified_since = Some(time.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<UploadPartCopyOutput> {
+        let copy_source = self.copy_source.ok_or_else(|| OssError {
+            kind: OssErrorKind::ValidationError,
+            context: Box::new(ErrorContext {
+                operation: Some("UploadPartCopy: copy_source is required".into()),
+                bucket: Some(self.bucket.to_string()),
+                object_key: Some(self.key.to_string()),
+                ..Default::default()
+            }),
+            source: None,
+        })?;
+
+        let endpoint = self.client.endpoint.clone();
+        let uri = oss_endpoint_url(
+            &endpoint,
+            Some(self.bucket.as_str()),
+            Some(self.key.as_str()),
+        );
+        let full_uri = format!(
+            "{}?partNumber={}&uploadId={}",
+            uri, self.part_number, self.upload_id
+        );
+
+        let query_params: Vec<(String, String)> = vec![
+            ("partNumber".into(), self.part_number.to_string()),
+            ("uploadId".into(), self.upload_id.clone()),
+        ];
+
+        let mut req = HttpRequest::builder()
+            .method(http::Method::PUT)
+            .uri(&full_uri);
+
+        req = req.header(
+            http::HeaderName::from_static("x-oss-copy-source"),
+            http::HeaderValue::from_str(&copy_source).map_err(|e| OssError {
+                kind: OssErrorKind::ValidationError,
+                context: Box::new(ErrorContext {
+                    operation: Some("set x-oss-copy-source header".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?,
+        );
+
+        if let Some(ref r) = self.copy_source_range {
+            req = req.header(
+                http::HeaderName::from_static("x-oss-copy-source-range"),
+                http::HeaderValue::from_str(r).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set x-oss-copy-source-range header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref im) = self.copy_source_if_match {
+            req = req.header(
+                http::HeaderName::from_static("x-oss-copy-source-if-match"),
+                http::HeaderValue::from_str(im).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set x-oss-copy-source-if-match header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref inm) = self.copy_source_if_none_match {
+            req = req.header(
+                http::HeaderName::from_static("x-oss-copy-source-if-none-match"),
+                http::HeaderValue::from_str(inm).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set x-oss-copy-source-if-none-match header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref ims) = self.copy_source_if_modified_since {
+            req = req.header(
+                http::HeaderName::from_static("x-oss-copy-source-if-modified-since"),
+                http::HeaderValue::from_str(ims).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set x-oss-copy-source-if-modified-since header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        if let Some(ref ius) = self.copy_source_if_unmodified_since {
+            req = req.header(
+                http::HeaderName::from_static("x-oss-copy-source-if-unmodified-since"),
+                http::HeaderValue::from_str(ius).map_err(|e| OssError {
+                    kind: OssErrorKind::ValidationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("set x-oss-copy-source-if-unmodified-since header".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?,
+            );
+        }
+
+        let request = req.build();
+
+        let response = self
+            .client
+            .send_signed(request, Some(&self.bucket), query_params)
+            .await
+            .map_err(|e| OssError {
+                kind: OssErrorKind::TransportError,
+                context: Box::new(ErrorContext {
+                    operation: Some("UploadPartCopy".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    endpoint: Some(endpoint),
+                    ..Default::default()
+                }),
+                source: Some(Box::new(e)),
+            })?;
+
+        if response.is_success() {
+            let request_id = response
+                .headers
+                .get("x-oss-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            let body_str = response.body_as_str().unwrap_or("");
+            let result: CopyPartResult =
+                crate::util::xml::from_xml(body_str).map_err(|e| OssError {
+                    kind: OssErrorKind::DeserializationError,
+                    context: Box::new(ErrorContext {
+                        operation: Some("UploadPartCopy: parse XML".into()),
+                        bucket: Some(self.bucket.to_string()),
+                        object_key: Some(self.key.to_string()),
+                        ..Default::default()
+                    }),
+                    source: Some(Box::new(e)),
+                })?;
+
+            Ok(UploadPartCopyOutput {
+                request_id,
+                etag: result.etag.trim_matches('"').to_string(),
+                part_number: self.part_number,
+                last_modified: result.last_modified,
+            })
+        } else {
+            Err(OssError {
+                kind: OssErrorKind::ServiceError(Box::new(crate::error::OssServiceError {
+                    status_code: response.status().as_u16(),
+                    code: String::new(),
+                    message: String::new(),
+                    request_id: String::new(),
+                    host_id: String::new(),
+                    resource: Some(self.key.to_string()),
+                    string_to_sign: None,
+                })),
+                context: Box::new(ErrorContext {
+                    operation: Some("UploadPartCopy".into()),
+                    bucket: Some(self.bucket.to_string()),
+                    object_key: Some(self.key.to_string()),
+                    ..Default::default()
+                }),
+                source: None,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadPartCopyOutput {
+    pub request_id: String,
+    pub etag: String,
+    pub part_number: u32,
+    pub last_modified: String,
+}
+
 impl BucketOperations {
     pub fn initiate_multipart_upload(
         &self,
@@ -621,6 +899,22 @@ impl BucketOperations {
     ) -> Result<UploadPartBuilder> {
         let object_key = ObjectKey::new(key.into())?;
         Ok(UploadPartBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+            upload_id,
+            part_number,
+        ))
+    }
+
+    pub fn upload_part_copy(
+        &self,
+        key: impl Into<String>,
+        upload_id: impl Into<String>,
+        part_number: u32,
+    ) -> Result<UploadPartCopyBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(UploadPartCopyBuilder::new(
             self.client_inner().clone(),
             self.bucket_name().clone(),
             object_key,
@@ -940,5 +1234,109 @@ mod tests {
             "UploadPart: part_number={}, etag={}",
             output.part_number, output.etag
         );
+    }
+
+    #[tokio::test]
+    async fn upload_part_copy_requires_copy_source() {
+        let (inner, _) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::new(), vec![]);
+        let builder = UploadPartCopyBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("k").unwrap(),
+            "upload-id",
+            1,
+        );
+        let result = builder.send().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn upload_part_copy_parses_etag_from_xml() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CopyPartResult>
+  <ETag>"abc123"</ETag>
+  <LastModified>2024-01-01T00:00:00.000Z</LastModified>
+</CopyPartResult>"#;
+        let (inner, requests) =
+            create_test_inner_with_response(http::StatusCode::OK, bytes::Bytes::from(xml), vec![]);
+        let builder = UploadPartCopyBuilder::new(
+            inner,
+            BucketName::new("test-bucket").unwrap(),
+            ObjectKey::new("dest-key.txt").unwrap(),
+            "upload-123",
+            1,
+        )
+        .copy_source("/src-bucket/src-key");
+
+        let output = builder.send().await.unwrap();
+        assert_eq!(output.etag, "abc123");
+        assert_eq!(output.part_number, 1);
+
+        let captured = requests.lock().unwrap();
+        assert!(
+            captured[0]
+                .headers
+                .get("x-oss-copy-source")
+                .map(|v| v.to_str().ok() == Some("/src-bucket/src-key"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires valid OSS credentials"]
+    async fn e2e_upload_part_copy() {
+        let ak = std::env::var("OSS_ACCESS_KEY_ID").expect("OSS_ACCESS_KEY_ID not set");
+        let sk = std::env::var("OSS_ACCESS_KEY_SECRET").expect("OSS_ACCESS_KEY_SECRET not set");
+        let region_str = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-wulanchabu".into());
+        let bucket_str = std::env::var("OSS_BUCKET").expect("OSS_BUCKET not set");
+
+        let region = Region::from_str(&region_str).unwrap_or_else(|_| Region::Custom {
+            endpoint: format!("oss-{}.aliyuncs.com", region_str),
+            region_id: region_str.clone(),
+        });
+
+        let client = crate::client::OSSClient::builder()
+            .region(region)
+            .credentials(ak, sk)
+            .build()
+            .unwrap();
+
+        let src_key = format!("test-pc-src-{}.txt", chrono::Utc::now().timestamp());
+        let dst_key = format!("test-pc-dst-{}.bin", chrono::Utc::now().timestamp());
+
+        client
+            .bucket(&bucket_str)
+            .unwrap()
+            .put_object(&src_key)
+            .unwrap()
+            .body(bytes::Bytes::from("source content for copy"))
+            .send()
+            .await
+            .unwrap();
+
+        let upload_id = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .initiate_multipart_upload(&dst_key)
+            .unwrap()
+            .send()
+            .await
+            .unwrap()
+            .upload_id;
+
+        let copy_source = format!("/{}/{}", bucket_str, src_key);
+        let output = client
+            .bucket(&bucket_str)
+            .unwrap()
+            .upload_part_copy(&dst_key, &upload_id, 1)
+            .unwrap()
+            .copy_source(&copy_source)
+            .send()
+            .await
+            .unwrap();
+
+        assert!(!output.etag.is_empty());
+        eprintln!("UploadPartCopy: etag={}", output.etag);
     }
 }
