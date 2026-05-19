@@ -1,3 +1,5 @@
+//! V4 (HMAC-SHA256) signature algorithm implementation.
+
 use std::collections::BTreeMap;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -18,9 +20,11 @@ const SEMI_REQUIRED_SIGNED_HEADER_PREFIXES: &[&str] = &["x-oss-"];
 
 const SEMI_REQUIRED_SIGNED_HEADERS: &[&str] = &["content-type", "content-md5"];
 
+/// V4 (HMAC-SHA256) signature algorithm.
 pub struct V4Signer;
 
 impl V4Signer {
+    /// Signs a V4 request and returns the Authorization header value.
     pub fn sign(&self, request: &SigningRequest, credentials: &Credentials) -> Result<String> {
         let timestamp = request.timestamp();
         let date = &timestamp[..8];
@@ -231,6 +235,7 @@ impl crate::signer::Signer for V4Signer {
     }
 }
 
+/// Request parameters for V4 signing.
 pub struct SigningRequest<'a> {
     pub method: &'a str,
     pub uri: &'a str,
@@ -242,6 +247,7 @@ pub struct SigningRequest<'a> {
 }
 
 impl<'a> SigningRequest<'a> {
+    /// Returns the timestamp.
     pub fn timestamp(&self) -> &str {
         self.timestamp
     }

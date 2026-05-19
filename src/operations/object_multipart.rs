@@ -1,3 +1,5 @@
+//! Multipart upload operations (initiate, upload, copy, complete, abort, list).
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

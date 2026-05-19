@@ -1,3 +1,5 @@
+//! Bucket referer (hotlink protection) operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

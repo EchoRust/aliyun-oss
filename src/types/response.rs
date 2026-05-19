@@ -1,8 +1,11 @@
+//! XML response deserialization types for OSS API responses.
+
 use serde::Deserialize;
 
 use super::bucket::BucketName;
 use super::object::{ETag, ObjectKey};
 
+/// Response for ListObjects (V1) API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "ListBucketResult")]
 pub struct ListObjectsOutput {
@@ -38,10 +41,12 @@ pub struct ListObjectsOutput {
 }
 
 impl ListObjectsOutput {
+    /// Returns the bucket name parsed from the response.
     pub fn bucket_name(&self) -> Option<BucketName> {
         BucketName::new(&self.name).ok()
     }
 
+    /// Returns the parsed object keys from the response.
     pub fn object_keys(&self) -> Vec<ObjectKey> {
         self.objects
             .iter()
@@ -50,12 +55,14 @@ impl ListObjectsOutput {
     }
 }
 
+/// A common prefix (directory-like entry) returned in list results.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CommonPrefix {
     #[serde(rename = "Prefix")]
     pub prefix: String,
 }
 
+/// Summary information for a single object in a list results response.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ObjectSummary {
     #[serde(rename = "Key")]
@@ -78,15 +85,18 @@ pub struct ObjectSummary {
 }
 
 impl ObjectSummary {
+    /// Returns the parsed ETag from the response.
     pub fn etag_parsed(&self) -> Option<ETag> {
         ETag::from_header(&self.etag)
     }
 
+    /// Returns the parsed object key.
     pub fn object_key(&self) -> Option<ObjectKey> {
         ObjectKey::new(&self.key).ok()
     }
 }
 
+/// Owner information from OSS API responses.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct OwnerInfo {
     #[serde(rename = "ID")]
@@ -96,6 +106,7 @@ pub struct OwnerInfo {
     pub display_name: String,
 }
 
+/// Response for ListObjectsV2 API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "ListBucketResult")]
 pub struct ListObjectsV2Output {
@@ -136,6 +147,7 @@ pub struct ListObjectsV2Output {
     pub objects: Vec<ObjectSummary>,
 }
 
+/// Response for the ListBuckets (GetService) API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "ListAllMyBucketsResult")]
 pub struct ListBucketsOutput {
@@ -146,12 +158,14 @@ pub struct ListBucketsOutput {
     pub buckets: BucketsContainer,
 }
 
+/// Container for bucket summaries in a ListBuckets response.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct BucketsContainer {
     #[serde(rename = "Bucket", default)]
     pub bucket: Vec<BucketSummary>,
 }
 
+/// Summary of a single bucket in the ListBuckets response.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct BucketSummary {
     #[serde(rename = "Name")]
@@ -176,6 +190,7 @@ pub struct BucketSummary {
     pub region: String,
 }
 
+/// Response for the GetBucketInfo API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "BucketInfo")]
 pub struct GetBucketInfoOutput {
@@ -183,6 +198,7 @@ pub struct GetBucketInfoOutput {
     pub bucket: BucketInfoDetail,
 }
 
+/// Detailed bucket information from GetBucketInfo.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct BucketInfoDetail {
     #[serde(rename = "Name")]
@@ -216,12 +232,14 @@ pub struct BucketInfoDetail {
     pub versioning: String,
 }
 
+/// ACL policy detail from bucket/object info responses.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AccessControlList {
     #[serde(rename = "Grant")]
     pub grant: String,
 }
 
+/// Response for the GetBucketStat API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "BucketStat")]
 pub struct GetBucketStatOutput {
@@ -271,6 +289,7 @@ pub struct GetBucketStatOutput {
     pub deep_cold_archive_object_count: u64,
 }
 
+/// Response for the GetObjectAcl API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "AccessControlPolicy")]
 pub struct GetObjectAclOutput {
@@ -280,12 +299,14 @@ pub struct GetObjectAclOutput {
     pub acl: AccessControlPolicyDetail,
 }
 
+/// ACL grant detail from access policy responses.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AccessControlPolicyDetail {
     #[serde(rename = "Grant")]
     pub grant: String,
 }
 
+/// Response for the DeleteMultipleObjects API.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(rename = "DeleteResult")]
 pub struct DeleteResult {
@@ -293,6 +314,7 @@ pub struct DeleteResult {
     pub deleted: Vec<DeletedObject>,
 }
 
+/// An entry for a successfully deleted object in a DeleteMultipleObjects response.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct DeletedObject {
     #[serde(rename = "Key")]
@@ -305,6 +327,7 @@ pub struct DeletedObject {
     pub version_id: String,
 }
 
+/// Response for the ListObjectVersions API.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename = "ListVersionsResult")]
 pub struct ListVersionsOutput {
@@ -332,6 +355,7 @@ pub struct ListVersionsOutput {
     pub common_prefixes: Vec<CommonPrefix>,
 }
 
+/// An object version entry in a ListObjectVersions response.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ObjectVersion {
     #[serde(rename = "Key")]
@@ -352,6 +376,7 @@ pub struct ObjectVersion {
     pub owner: Option<OwnerInfo>,
 }
 
+/// A delete marker entry in a ListObjectVersions response.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct DeleteMarkerSummary {
     #[serde(rename = "Key")]

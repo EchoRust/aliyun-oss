@@ -1,3 +1,5 @@
+//! Bucket name newtype with validation.
+
 use std::fmt;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
@@ -5,16 +7,19 @@ use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
 const MIN_BUCKET_NAME_LENGTH: usize = 3;
 const MAX_BUCKET_NAME_LENGTH: usize = 63;
 
+/// A validated OSS bucket name (3-63 lowercase alphanumeric and hyphens).
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct BucketName(String);
 
 impl BucketName {
+    /// Creates a new `BucketName` after validating the input.
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
         validate_bucket_name(&name)?;
         Ok(Self(name))
     }
 
+    /// Returns the bucket name as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }

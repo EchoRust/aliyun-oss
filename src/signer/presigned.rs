@@ -1,3 +1,5 @@
+//! Pre-signed URL generation (V1 and V4).
+
 use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -82,6 +84,7 @@ fn url_escape_path(s: &str) -> String {
     result
 }
 
+/// Builder for generating pre-signed URLs for OSS access.
 pub struct PreSignedUrlBuilder {
     credentials: Credentials,
     region: String,
@@ -117,35 +120,42 @@ impl PreSignedUrlBuilder {
         }
     }
 
+    /// Sets the HTTP method for the pre-signed URL.
     pub fn method(mut self, m: impl Into<String>) -> Self {
         self.method = m.into();
         self
     }
 
+    /// Sets the expiration duration.
     pub fn expires(mut self, d: Duration) -> Self {
         self.expires = d;
         self
     }
 
+    /// Sets the Content-Type header for the pre-signed request.
     pub fn content_type(mut self, ct: impl Into<String>) -> Self {
         self.content_type = Some(ct.into());
         self
     }
 
+    /// Sets the Content-MD5 header for the pre-signed request.
     pub fn content_md5(mut self, md5: impl Into<String>) -> Self {
         self.content_md5 = Some(md5.into());
         self
     }
 
+    /// Adds an additional query parameter.
     pub fn query_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.additional_query.push((key.into(), value.into()));
         self
     }
 
+    /// Generates a pre-signed URL using the V4 signing algorithm.
     pub fn generate(self) -> Result<String> {
         self.generate_v4()
     }
 
+    /// Generates a pre-signed URL using the V1 signing algorithm (legacy).
     pub fn generate_v1(self) -> Result<String> {
         if self.expires > MAX_EXPIRES {
             return Err(OssError {
@@ -206,6 +216,7 @@ impl PreSignedUrlBuilder {
         ))
     }
 
+    /// Generates a pre-signed URL using the V4 signing algorithm.
     pub fn generate_v4(self) -> Result<String> {
         if self.expires > MAX_EXPIRES {
             return Err(OssError {

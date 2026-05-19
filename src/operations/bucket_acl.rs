@@ -1,3 +1,5 @@
+//! Bucket ACL (Access Control List) operations.
+
 use std::sync::Arc;
 
 use serde::Deserialize;

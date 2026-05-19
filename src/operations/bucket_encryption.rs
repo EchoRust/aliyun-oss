@@ -1,3 +1,5 @@
+//! Bucket server-side encryption operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

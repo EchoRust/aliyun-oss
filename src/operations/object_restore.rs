@@ -1,3 +1,5 @@
+//! Archive object restore operations.
+
 use std::sync::Arc;
 
 use serde::Serialize;

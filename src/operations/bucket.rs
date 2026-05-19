@@ -1,3 +1,5 @@
+//! Bucket-level operations (create, delete, info, stat).
+
 use std::sync::Arc;
 
 use serde::Serialize;

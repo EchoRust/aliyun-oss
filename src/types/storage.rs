@@ -1,8 +1,11 @@
+//! Storage class and server-side encryption types.
+
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind};
 
+/// OSS storage class for object storage tiering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageClass {
     #[default]
@@ -14,6 +17,7 @@ pub enum StorageClass {
 }
 
 impl StorageClass {
+    /// Returns the storage class string representation (e.g. "Standard").
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Standard => "Standard",
@@ -53,6 +57,7 @@ impl FromStr for StorageClass {
     }
 }
 
+/// Data redundancy type: locally redundant (LRS) or zone-redundant (ZRS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DataRedundancyType {
     #[default]
@@ -61,6 +66,7 @@ pub enum DataRedundancyType {
 }
 
 impl DataRedundancyType {
+    /// Returns the redundancy type string (e.g. "LRS").
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LRS => "LRS",
@@ -75,6 +81,7 @@ impl fmt::Display for DataRedundancyType {
     }
 }
 
+/// Server-side encryption configuration for objects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerSideEncryption {
     AES256,
@@ -83,6 +90,7 @@ pub enum ServerSideEncryption {
 }
 
 impl ServerSideEncryption {
+    /// Returns the encryption algorithm identifier (e.g. "AES256").
     pub fn as_str(&self) -> &str {
         match self {
             Self::AES256 => "AES256",
@@ -91,6 +99,7 @@ impl ServerSideEncryption {
         }
     }
 
+    /// Returns the KMS key ID, if configured.
     pub fn key_id(&self) -> Option<&str> {
         match self {
             Self::KMSWithKey(key) => Some(key.as_str()),

@@ -1,3 +1,5 @@
+//! Requester-pays configuration operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

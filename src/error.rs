@@ -1,5 +1,35 @@
+//! Error types for the Alibaba Cloud OSS SDK.
+//!
+//! The primary error type is [`OssError`], which wraps an [`OssErrorKind`]
+//! together with context information and an optional source error.
+//!
+//! # Error handling pattern
+//!
+//! All public functions in this crate return [`Result<T>`](crate::error::Result),
+//! a type alias for `std::result::Result<T, OssError>`.
+//!
+//! ```rust
+//! use aliyun_oss::error::{OssError, OssErrorKind};
+//!
+//! fn handle_error(err: OssError) {
+//!     match err.kind {
+//!         OssErrorKind::ServiceError(ref se) => {
+//!             eprintln!("OSS returned {}: {}", se.status_code, se.message);
+//!         }
+//!         OssErrorKind::ValidationError => {
+//!             eprintln!("Invalid input");
+//!         }
+//!         _ => eprintln!("{}", err),
+//!     }
+//! }
+//! ```
+
 use std::fmt;
 
+/// Represents an OSS service error parsed from an error XML response body.
+///
+/// Contains the OSS-specific error fields returned by the API when a
+/// request fails with a 4xx or 5xx status code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OssServiceError {
     pub status_code: u16,
@@ -39,6 +69,7 @@ fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
     Some(xml[start..start + end].trim().to_string())
 }
 
+/// Categorizes the type of error that occurred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OssErrorKind {
     ServiceError(Box<OssServiceError>),
@@ -74,6 +105,10 @@ impl fmt::Display for OssErrorKind {
     }
 }
 
+/// Contextual information about where an error occurred.
+///
+/// Typically includes the operation name, bucket, and object key
+/// involved when the error was produced.
 #[derive(Debug, Clone, Default)]
 pub struct ErrorContext {
     pub operation: Option<String>,
@@ -112,6 +147,31 @@ impl fmt::Display for ErrorContext {
     }
 }
 
+/// The unified error type for all OSS SDK operations.
+///
+/// Wraps an [`OssErrorKind`] together with context information and an
+/// optional chained source error. All fallible SDK methods return this
+/// type inside a `Result`.
+///
+/// # Examples
+///
+/// ```rust
+/// use aliyun_oss::error::{OssError, OssErrorKind, OssServiceError};
+///
+/// let err = OssError {
+///     kind: OssErrorKind::ServiceError(Box::new(OssServiceError {
+///         status_code: 404,
+///         code: "NoSuchBucket".into(),
+///         message: "The bucket does not exist.".into(),
+///         request_id: "req-123".into(),
+///         host_id: "oss-cn-hangzhou.aliyuncs.com".into(),
+///         resource: None,
+///         string_to_sign: None,
+///     })),
+///     context: Box::new(Default::default()),
+///     source: None,
+/// };
+/// ```
 #[derive(Debug)]
 pub struct OssError {
     pub kind: OssErrorKind,
@@ -176,6 +236,9 @@ impl std::error::Error for OssError {
     }
 }
 
+/// Convenience type alias for `Result<T, OssError>`.
+///
+/// All fallible SDK methods use this type as their return type.
 pub type Result<T> = std::result::Result<T, OssError>;
 
 #[cfg(test)]

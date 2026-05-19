@@ -1,3 +1,5 @@
+//! Cross-region replication operations.
+
 use std::sync::Arc;
 
 use crate::client::{BucketOperations, OSSClientInner};

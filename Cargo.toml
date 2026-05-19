@@ -11,22 +11,22 @@ repository = "https://github.com/EchoRust/aliyun-oss"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "2"
-http = "1"
-bytes = "1"
-async-trait = "0.1"
-url = "2"
-base64 = "0.22"
+thiserror = "2.0.18"
+http = "1.4.0"
+bytes = "1.11.1"
+async-trait = "0.1.89"
+url = "2.5.8"
+base64 = "0.22.1"
 hmac = "0.13.0"
 sha2 = "0.11.0"
-hex = "0.4"
-chrono = "0.4"
+hex = "0.4.3"
+chrono = "0.4.44"
 sha1 = "0.11.0"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 quick-xml = { version = "0.40.1", features = ["serialize"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 reqwest = "0.13.3"
-md-5 = "0.10"
+md-5 = "0.11.0"
 
 [dev-dependencies]
 wiremock = "0.6"

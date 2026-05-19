@@ -1,7 +1,10 @@
+//! XML serialization and deserialization utilities.
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{OssError, OssErrorKind, Result};
 
+/// Serializes a value to an XML string using quick-xml.
 pub fn to_xml<T: Serialize>(value: &T) -> Result<String> {
     quick_xml::se::to_string(value).map_err(|e| OssError {
         kind: OssErrorKind::XmlError,
@@ -13,6 +16,7 @@ pub fn to_xml<T: Serialize>(value: &T) -> Result<String> {
     })
 }
 
+/// Deserializes an XML string into a value using quick-xml.
 pub fn from_xml<T: for<'de> Deserialize<'de>>(xml: &str) -> Result<T> {
     quick_xml::de::from_str(xml).map_err(|e| OssError {
         kind: OssErrorKind::XmlError,

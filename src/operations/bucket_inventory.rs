@@ -1,3 +1,5 @@
+//! Bucket inventory configuration operations.
+
 use std::sync::Arc;
 
 use crate::client::{BucketOperations, OSSClientInner};

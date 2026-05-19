@@ -1,3 +1,5 @@
+//! Copy object operations.
+
 use std::sync::Arc;
 
 use serde::Deserialize;

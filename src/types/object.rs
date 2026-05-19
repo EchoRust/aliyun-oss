@@ -1,23 +1,29 @@
+//! Object key and ETag newtype wrappers.
+
 use std::fmt;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
 
 const MAX_OBJECT_KEY_LENGTH: usize = 1024;
 
+/// A validated OSS object key (non-empty, max 1024 characters).
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ObjectKey(String);
 
 impl ObjectKey {
+    /// Creates a new `ObjectKey` after validating the input.
     pub fn new(key: impl Into<String>) -> Result<Self> {
         let key = key.into();
         validate_object_key(&key)?;
         Ok(Self(key))
     }
 
+    /// Returns the object key as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// Returns the parent directory path, if any.
     pub fn parent(&self) -> Option<&str> {
         let path = &self.0;
         if let Some(pos) = path.rfind('/') {
@@ -27,6 +33,7 @@ impl ObjectKey {
         }
     }
 
+    /// Returns the file name component of the object key.
     pub fn file_name(&self) -> &str {
         let path = &self.0;
         if let Some(pos) = path.rfind('/') {
@@ -80,14 +87,17 @@ fn validate_object_key(key: &str) -> Result<()> {
     Ok(())
 }
 
+/// An entity tag (ETag) for object versioning, returned from OSS responses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ETag(String);
 
 impl ETag {
+    /// Creates a new `ETag` from a raw string value.
     pub fn new(tag: impl Into<String>) -> Self {
         Self(tag.into())
     }
 
+    /// Parses an ETag from an HTTP response header value, stripping surrounding quotes.
     pub fn from_header(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         if trimmed.len() < 2 {
@@ -100,6 +110,7 @@ impl ETag {
         }
     }
 
+    /// Returns the ETag as a string slice (without quotes).
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -111,6 +122,7 @@ impl fmt::Display for ETag {
     }
 }
 
+/// Represents an OSS object owner identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Owner {
     pub id: String,
@@ -118,6 +130,7 @@ pub struct Owner {
 }
 
 impl Owner {
+    /// Creates a new `Owner` with the given ID.
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -125,6 +138,7 @@ impl Owner {
         }
     }
 
+    /// Sets the display name for the owner.
     pub fn with_display_name(mut self, name: impl Into<String>) -> Self {
         self.display_name = Some(name.into());
         self

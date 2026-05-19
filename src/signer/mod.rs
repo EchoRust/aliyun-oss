@@ -1,3 +1,5 @@
+//! Signer trait and factory for request signing.
+
 pub mod presigned;
 pub mod v1;
 pub mod v4;
@@ -5,11 +7,13 @@ pub mod v4;
 use crate::config::credentials::Credentials;
 use crate::error::Result;
 
+/// The signature version to use for request signing.
 pub enum SignVersion {
     V1,
     V4,
 }
 
+/// A request to be signed, containing all necessary elements.
 pub struct SigningRequest {
     pub method: String,
     pub uri: String,
@@ -20,11 +24,13 @@ pub struct SigningRequest {
 }
 
 impl SigningRequest {
+    /// Creates a new `SigningRequestBuilder`.
     pub fn builder() -> SigningRequestBuilder {
         SigningRequestBuilder::default()
     }
 }
 
+/// Builder for constructing a `SigningRequest`.
 #[derive(Default)]
 pub struct SigningRequestBuilder {
     method: Option<String>,
@@ -36,36 +42,43 @@ pub struct SigningRequestBuilder {
 }
 
 impl SigningRequestBuilder {
+    /// Sets the HTTP method.
     pub fn method(mut self, method: impl Into<String>) -> Self {
         self.method = Some(method.into());
         self
     }
 
+    /// Sets the URI path.
     pub fn uri(mut self, uri: impl Into<String>) -> Self {
         self.uri = Some(uri.into());
         self
     }
 
+    /// Sets the region.
     pub fn region(mut self, region: impl Into<String>) -> Self {
         self.region = Some(region.into());
         self
     }
 
+    /// Adds a query parameter.
     pub fn query_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((key.into(), value.into()));
         self
     }
 
+    /// Adds a header.
     pub fn header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((key.into(), value.into()));
         self
     }
 
+    /// Sets the timestamp.
     pub fn timestamp(mut self, ts: impl Into<String>) -> Self {
         self.timestamp = Some(ts.into());
         self
     }
 
+    /// Builds the `SigningRequest`.
     pub fn build(self) -> Result<SigningRequest> {
         Ok(SigningRequest {
             method: self.method.unwrap_or_default(),
@@ -78,10 +91,13 @@ impl SigningRequestBuilder {
     }
 }
 
+/// Trait for signing HTTP requests.
 pub trait Signer: Send + Sync {
+    /// Signs the given request in place, adding the Authorization header.
     fn sign(&self, request: &mut SigningRequest, credentials: &Credentials) -> Result<()>;
 }
 
+/// Creates a new signer for the specified signature version.
 pub fn create_signer(version: SignVersion) -> Box<dyn Signer> {
     match version {
         SignVersion::V4 => Box::new(v4::V4Signer),

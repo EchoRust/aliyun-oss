@@ -1,5 +1,8 @@
+//! Request body abstraction for uploads.
+
 use std::path::PathBuf;
 
+/// An abstraction over upload request bodies: bytes, file path, or empty.
 pub enum RequestBody {
     Bytes(bytes::Bytes),
     File(PathBuf),
@@ -7,6 +10,7 @@ pub enum RequestBody {
 }
 
 impl RequestBody {
+    /// Returns the length of the body in bytes (0 for File and Empty variants).
     pub fn len(&self) -> usize {
         match self {
             Self::Bytes(b) => b.len(),
@@ -15,6 +19,7 @@ impl RequestBody {
         }
     }
 
+    /// Returns `true` if the body contains no data.
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Bytes(b) => b.is_empty(),
@@ -23,6 +28,7 @@ impl RequestBody {
         }
     }
 
+    /// Returns the byte content, if the body is of the `Bytes` variant.
     pub fn to_bytes(&self) -> Option<bytes::Bytes> {
         match self {
             Self::Bytes(b) => Some(b.clone()),

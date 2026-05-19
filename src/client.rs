@@ -75,6 +75,27 @@ impl OSSClientInner {
     }
 }
 
+/// The main entry point for the Alibaba Cloud OSS SDK.
+///
+/// `OSSClient` is cheaply cloneable (wraps an `Arc` internally) and provides
+/// access to bucket-level and service-level operations.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use aliyun_oss::client::OSSClient;
+/// use aliyun_oss::types::region::Region;
+///
+/// # async fn example() -> aliyun_oss::error::Result<()> {
+/// let client = OSSClient::builder()
+///     .region(Region::CnHangzhou)
+///     .credentials("your-ak", "your-sk")
+///     .build()?;
+///
+/// let bucket = client.bucket("my-bucket")?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct OSSClient {
     inner: Arc<OSSClientInner>,

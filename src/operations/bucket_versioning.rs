@@ -1,3 +1,5 @@
+//! Bucket versioning operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

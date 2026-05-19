@@ -1,3 +1,6 @@
+//! URI encoding and endpoint URL generation.
+
+/// Percent-encodes a URI path segment, preserving unreserved characters (`/`, `~`, `-`, `_`, `.`).
 pub fn uri_encode(input: &str) -> String {
     let mut result = String::with_capacity(input.len() * 3);
     for byte in input.bytes() {
@@ -13,6 +16,7 @@ pub fn uri_encode(input: &str) -> String {
     result
 }
 
+/// Constructs an HTTPS OSS endpoint URL from endpoint, optional bucket, and optional key.
 pub fn oss_endpoint_url(endpoint: &str, bucket: Option<&str>, key: Option<&str>) -> String {
     match (bucket, key) {
         (Some(bucket), Some(key)) => {
@@ -31,6 +35,7 @@ pub fn oss_endpoint_url(endpoint: &str, bucket: Option<&str>, key: Option<&str>)
     }
 }
 
+/// Like `oss_endpoint_url` but produces an HTTP (non-TLS) URL.
 pub fn oss_endpoint_url_http(endpoint: &str, bucket: Option<&str>, key: Option<&str>) -> String {
     let url = oss_endpoint_url(endpoint, bucket, key);
     url.replacen("https://", "http://", 1)

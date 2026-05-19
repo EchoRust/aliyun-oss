@@ -1,8 +1,11 @@
+//! Region types with endpoint generation.
+
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind};
 
+/// An OSS region defining endpoints and network configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Region {
     CnHangzhou,
@@ -52,6 +55,7 @@ pub enum Region {
 }
 
 impl Region {
+    /// Creates a custom region with an arbitrary endpoint and region ID.
     pub fn custom(endpoint: impl Into<String>, region_id: impl Into<String>) -> Self {
         Self::Custom {
             endpoint: endpoint.into(),
@@ -59,6 +63,7 @@ impl Region {
         }
     }
 
+    /// Returns the region identifier string (e.g. "cn-hangzhou").
     pub fn region_id(&self) -> &str {
         match self {
             Self::CnHangzhou => "cn-hangzhou",
@@ -108,6 +113,7 @@ impl Region {
         }
     }
 
+    /// Returns the external (internet-facing) endpoint for this region.
     pub fn external_endpoint(&self) -> &str {
         match self {
             Self::CnHangzhou => "oss-cn-hangzhou.aliyuncs.com",
@@ -157,6 +163,7 @@ impl Region {
         }
     }
 
+    /// Returns the internal (VPC) endpoint for this region.
     pub fn internal_endpoint(&self) -> &str {
         match self {
             Self::CnHangzhou => "oss-cn-hangzhou-internal.aliyuncs.com",
@@ -206,6 +213,7 @@ impl Region {
         }
     }
 
+    /// Returns the dual-stack (IPv4/IPv6) endpoint, if supported.
     pub fn dual_stack_endpoint(&self) -> Option<&str> {
         match self {
             Self::CnHangzhou => Some("cn-hangzhou.oss.aliyuncs.com"),
@@ -229,6 +237,7 @@ impl Region {
         }
     }
 
+    /// Returns the internal VIP CIDR blocks for this region.
     pub fn internal_vip_cidrs(&self) -> &[&str] {
         match self {
             Self::CnHangzhou => &[
@@ -347,10 +356,12 @@ impl Region {
         }
     }
 
+    /// Returns the global acceleration endpoint.
     pub fn acceleration_endpoint(&self) -> String {
         "oss-accelerate.aliyuncs.com".to_string()
     }
 
+    /// Returns all known regions.
     pub fn all() -> Vec<Self> {
         vec![
             Self::CnHangzhou,

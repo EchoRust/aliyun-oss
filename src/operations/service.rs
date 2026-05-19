@@ -1,3 +1,5 @@
+//! Service-level operations (list buckets).
+
 use std::sync::Arc;
 
 use crate::client::OSSClient;

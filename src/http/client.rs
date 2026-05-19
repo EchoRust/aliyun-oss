@@ -1,8 +1,11 @@
+//! HTTP client abstraction and Reqwest-based implementation.
+
 use async_trait::async_trait;
 use http::HeaderMap;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
 
+/// A fully-formed HTTP request ready to be sent.
 #[derive(Debug)]
 pub struct HttpRequest {
     pub method: http::Method,
@@ -12,11 +15,13 @@ pub struct HttpRequest {
 }
 
 impl HttpRequest {
+    /// Creates a new `HttpRequestBuilder`.
     pub fn builder() -> HttpRequestBuilder {
         HttpRequestBuilder::default()
     }
 }
 
+/// Builder for constructing an `HttpRequest`.
 #[derive(Default)]
 pub struct HttpRequestBuilder {
     method: Option<http::Method>,
@@ -26,26 +31,31 @@ pub struct HttpRequestBuilder {
 }
 
 impl HttpRequestBuilder {
+    /// Sets the HTTP method.
     pub fn method(mut self, method: http::Method) -> Self {
         self.method = Some(method);
         self
     }
 
+    /// Sets the request URI.
     pub fn uri(mut self, uri: impl Into<String>) -> Self {
         self.uri = Some(uri.into());
         self
     }
 
+    /// Adds a header to the request.
     pub fn header(mut self, key: http::HeaderName, value: http::HeaderValue) -> Self {
         self.headers.insert(key, value);
         self
     }
 
+    /// Sets the request body.
     pub fn body(mut self, body: impl Into<bytes::Bytes>) -> Self {
         self.body = Some(body.into());
         self
     }
 
+    /// Builds the `HttpRequest`.
     pub fn build(self) -> HttpRequest {
         HttpRequest {
             method: self.method.unwrap_or(http::Method::GET),
@@ -56,6 +66,7 @@ impl HttpRequestBuilder {
     }
 }
 
+/// An HTTP response containing status, headers, and body.
 #[derive(Debug)]
 pub struct HttpResponse {
     pub status: http::StatusCode,
@@ -64,6 +75,7 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
+    /// Creates a new `HttpResponse` with the given status code.
     pub fn new(status: http::StatusCode) -> Self {
         Self {
             status,
@@ -72,29 +84,36 @@ impl HttpResponse {
         }
     }
 
+    /// Returns the HTTP status code.
     pub fn status(&self) -> http::StatusCode {
         self.status
     }
 
+    /// Returns `true` if the status is in the 2xx range.
     pub fn is_success(&self) -> bool {
         self.status.is_success()
     }
 
+    /// Returns the response body as a UTF-8 string, if valid.
     pub fn body_as_str(&self) -> Option<&str> {
         std::str::from_utf8(&self.body).ok()
     }
 }
 
+/// Trait abstracting the HTTP transport layer.
 #[async_trait]
 pub trait HttpClient: Send + Sync {
+    /// Sends an HTTP request and returns the response.
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse>;
 }
 
+/// Reqwest-based implementation of `HttpClient`.
 pub struct ReqwestHttpClient {
     inner: reqwest::Client,
 }
 
 impl ReqwestHttpClient {
+    /// Creates a new `ReqwestHttpClient`.
     pub fn new() -> Result<Self> {
         let client = reqwest::Client::builder().build().map_err(|e| OssError {
             kind: OssErrorKind::ConfigError,

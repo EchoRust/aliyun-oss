@@ -1,3 +1,5 @@
+//! Credential types and provider trait for OSS authentication.
+
 use std::fmt;
 
 use async_trait::async_trait;
@@ -5,13 +7,16 @@ use async_trait::async_trait;
 use crate::error::{OssError, OssErrorKind, Result};
 
 #[derive(Clone)]
+/// An Alibaba Cloud AccessKey ID.
 pub struct AccessKeyId(String);
 
 impl AccessKeyId {
+    /// Creates a new `AccessKeyId` from a string.
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
+    /// Returns the inner key ID as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -44,13 +49,16 @@ impl fmt::Debug for AccessKeyId {
 }
 
 #[derive(Clone)]
+/// An Alibaba Cloud AccessKey Secret with debug masking.
 pub struct AccessKeySecret(String);
 
 impl AccessKeySecret {
+    /// Creates a new `AccessKeySecret` from a string.
     pub fn new(secret: impl Into<String>) -> Self {
         Self(secret.into())
     }
 
+    /// Returns the inner secret as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -85,6 +93,7 @@ fn mask_string(s: &str) -> String {
     masked
 }
 
+/// OSS access credentials: AccessKey ID, AccessKey Secret, and optional security token.
 pub struct Credentials {
     access_key_id: AccessKeyId,
     access_key_secret: AccessKeySecret,
@@ -92,18 +101,22 @@ pub struct Credentials {
 }
 
 impl Credentials {
+    /// Creates a new `CredentialsBuilder`.
     pub fn builder() -> CredentialsBuilder {
         CredentialsBuilder::default()
     }
 
+    /// Returns the AccessKey ID.
     pub fn access_key_id(&self) -> &str {
         self.access_key_id.as_str()
     }
 
+    /// Returns the AccessKey Secret.
     pub fn access_key_secret(&self) -> &str {
         self.access_key_secret.as_str()
     }
 
+    /// Returns the optional security token.
     pub fn security_token(&self) -> Option<&str> {
         self.security_token.as_deref()
     }
@@ -122,6 +135,7 @@ impl fmt::Debug for Credentials {
     }
 }
 
+/// Builder for constructing `Credentials`.
 #[derive(Default)]
 pub struct CredentialsBuilder {
     access_key_id: Option<AccessKeyId>,
@@ -130,21 +144,25 @@ pub struct CredentialsBuilder {
 }
 
 impl CredentialsBuilder {
+    /// Sets the AccessKey ID.
     pub fn access_key_id(mut self, id: impl Into<AccessKeyId>) -> Self {
         self.access_key_id = Some(id.into());
         self
     }
 
+    /// Sets the AccessKey Secret.
     pub fn access_key_secret(mut self, secret: impl Into<AccessKeySecret>) -> Self {
         self.access_key_secret = Some(secret.into());
         self
     }
 
+    /// Sets the optional security token (for STS credentials).
     pub fn security_token(mut self, token: impl Into<String>) -> Self {
         self.security_token = Some(token.into());
         self
     }
 
+    /// Builds the `Credentials`, returning an error if required fields are missing.
     pub fn build(self) -> Result<Credentials> {
         Ok(Credentials {
             access_key_id: self.access_key_id.ok_or_else(|| OssError {
@@ -168,16 +186,20 @@ impl CredentialsBuilder {
     }
 }
 
+/// Trait for providing OSS credentials asynchronously.
 #[async_trait]
 pub trait CredentialsProvider: Send + Sync {
+    /// Returns the current credentials.
     async fn credentials(&self) -> Result<Credentials>;
 }
 
+/// A `CredentialsProvider` that returns statically configured credentials.
 pub struct StaticCredentialsProvider {
     credentials: Credentials,
 }
 
 impl StaticCredentialsProvider {
+    /// Creates a new `StaticCredentialsProvider` with the given credentials.
     pub fn new(credentials: Credentials) -> Self {
         Self { credentials }
     }
@@ -194,6 +216,7 @@ impl CredentialsProvider for StaticCredentialsProvider {
     }
 }
 
+/// A `CredentialsProvider` that reads credentials from environment variables.
 pub struct EnvironmentCredentialsProvider;
 
 impl EnvironmentCredentialsProvider {
@@ -237,31 +260,37 @@ impl CredentialsProvider for EnvironmentCredentialsProvider {
     }
 }
 
+/// A credentials provider chain that tries multiple providers in order.
 pub struct CredentialsChain {
     providers: Vec<Box<dyn CredentialsProvider>>,
 }
 
 impl CredentialsChain {
+    /// Creates a new `CredentialsChain` from a list of providers.
     pub fn new(providers: Vec<Box<dyn CredentialsProvider>>) -> Self {
         Self { providers }
     }
 
+    /// Creates a new `CredentialsChainBuilder`.
     pub fn builder() -> CredentialsChainBuilder {
         CredentialsChainBuilder::default()
     }
 }
 
+/// Builder for constructing a `CredentialsChain`.
 #[derive(Default)]
 pub struct CredentialsChainBuilder {
     providers: Vec<Box<dyn CredentialsProvider>>,
 }
 
 impl CredentialsChainBuilder {
+    /// Adds a provider to the chain.
     pub fn with(mut self, provider: impl CredentialsProvider + 'static) -> Self {
         self.providers.push(Box::new(provider));
         self
     }
 
+    /// Builds the `CredentialsChain`.
     pub fn build(self) -> CredentialsChain {
         CredentialsChain::new(self.providers)
     }

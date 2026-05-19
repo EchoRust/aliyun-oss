@@ -1,8 +1,11 @@
+//! Access Control List (ACL) types for buckets and objects.
+
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{ErrorContext, OssError, OssErrorKind};
 
+/// Access Control List polity for a bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BucketAcl {
     #[default]
@@ -12,6 +15,7 @@ pub enum BucketAcl {
 }
 
 impl BucketAcl {
+    /// Returns the ACL string representation (e.g. "private").
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Private => "private",
@@ -47,6 +51,7 @@ impl FromStr for BucketAcl {
     }
 }
 
+/// Access Control List polity for an object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObjectAcl {
     #[default]
@@ -57,6 +62,7 @@ pub enum ObjectAcl {
 }
 
 impl ObjectAcl {
+    /// Returns the ACL string representation (e.g. "private").
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",

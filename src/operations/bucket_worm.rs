@@ -1,3 +1,5 @@
+//! WORM (Write Once Read Many) operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

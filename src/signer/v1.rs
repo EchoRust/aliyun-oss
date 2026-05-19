@@ -1,3 +1,5 @@
+//! V1 (HMAC-SHA1) signature algorithm implementation.
+
 use std::collections::BTreeMap;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -8,6 +10,7 @@ use crate::error::Result;
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// Request parameters for V1 signing.
 pub struct V1SigningRequest<'a> {
     pub verb: &'a str,
     pub content_md5: &'a str,
@@ -19,9 +22,11 @@ pub struct V1SigningRequest<'a> {
     pub query_params: &'a [(&'a str, &'a str)],
 }
 
+/// V1 (HMAC-SHA1) signature algorithm.
 pub struct V1Signer;
 
 impl V1Signer {
+    /// Signs a V1 request and returns the Authorization header value.
     pub fn sign(
         &self,
         request: &V1SigningRequest<'_>,

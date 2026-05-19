@@ -1,3 +1,5 @@
+//! CNAME domain binding operations.
+
 use crate::client::{BucketOperations, OSSClientInner};
 use crate::error::{ErrorContext, OssError, OssErrorKind, Result};
 use crate::http::client::{HttpRequest, HttpResponse};

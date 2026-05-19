@@ -1,3 +1,5 @@
+//! Archive direct read configuration operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

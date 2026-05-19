@@ -1,3 +1,5 @@
+//! Static website hosting operations.
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

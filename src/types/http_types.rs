@@ -1,8 +1,11 @@
+//! HTTP method and status code wrappers.
+
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{OssError, OssErrorKind};
 
+/// Supported HTTP methods for OSS API requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
     Get,
@@ -14,6 +17,7 @@ pub enum HttpMethod {
 }
 
 impl HttpMethod {
+    /// Returns the uppercase HTTP method string (e.g. "GET").
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
@@ -55,17 +59,20 @@ impl fmt::Display for HttpMethod {
     }
 }
 
+/// A collection of HTTP headers backed by `http::HeaderMap`.
 pub struct HttpHeaders {
     pub(crate) inner: http::HeaderMap,
 }
 
 impl HttpHeaders {
+    /// Creates an empty `HttpHeaders` collection.
     pub fn new() -> Self {
         Self {
             inner: http::HeaderMap::new(),
         }
     }
 
+    /// Inserts a header name/value pair, returning any old value.
     pub fn insert<K, V>(&mut self, key: K, value: V) -> Option<http::HeaderValue>
     where
         K: TryInto<http::HeaderName>,
@@ -78,14 +85,17 @@ impl HttpHeaders {
         self.inner.insert(name, val)
     }
 
+    /// Gets a header value by name (case-insensitive).
     pub fn get(&self, key: impl AsRef<str>) -> Option<&http::HeaderValue> {
         self.inner.get(key.as_ref())
     }
 
+    /// Returns `true` if the header collection contains the given key.
     pub fn contains_key(&self, key: impl AsRef<str>) -> bool {
         self.inner.contains_key(key.as_ref())
     }
 
+    /// Returns `true` if the header collection is empty.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -105,12 +115,14 @@ impl fmt::Debug for HttpHeaders {
     }
 }
 
+/// A MIME content type for HTTP requests and responses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentType {
     inner: String,
 }
 
 impl ContentType {
+    /// Common content type constants.
     pub const TEXT_PLAIN: &'static str = "text/plain";
     pub const TEXT_HTML: &'static str = "text/html";
     pub const TEXT_CSS: &'static str = "text/css";
@@ -127,6 +139,7 @@ impl ContentType {
     pub const VIDEO_MP4: &'static str = "video/mp4";
     pub const AUDIO_MPEG: &'static str = "audio/mpeg";
 
+    /// Resolves a content type from a file extension.
     pub fn from_extension(ext: &str) -> Self {
         let mime = match ext.to_lowercase().as_str() {
             "html" | "htm" => Self::TEXT_HTML,
@@ -150,6 +163,7 @@ impl ContentType {
         }
     }
 
+    /// Returns the MIME type string (e.g. "application/json").
     pub fn as_str(&self) -> &str {
         &self.inner
     }

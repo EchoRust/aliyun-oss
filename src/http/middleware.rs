@@ -1,3 +1,5 @@
+//! HTTP middleware chain for request processing.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,17 +8,21 @@ use async_trait::async_trait;
 use super::client::{HttpClient, HttpRequest, HttpResponse};
 use crate::error::Result;
 
+/// Trait for middleware that intercepts HTTP requests.
 #[async_trait]
 pub trait Middleware: Send + Sync {
+    /// Handles a request, potentially passing it through the chain.
     async fn handle(&self, request: HttpRequest, chain: &MiddlewareChain) -> Result<HttpResponse>;
 }
 
+/// A chain of middleware that processes HTTP requests sequentially.
 pub struct MiddlewareChain {
     middlewares: Vec<Box<dyn Middleware>>,
     http: Arc<dyn HttpClient>,
 }
 
 impl MiddlewareChain {
+    /// Creates a new `MiddlewareChain` with the underlying HTTP client.
     pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
             middlewares: Vec::new(),
@@ -24,11 +30,13 @@ impl MiddlewareChain {
         }
     }
 
+    /// Adds a middleware to the chain.
     pub fn with_middleware(mut self, middleware: impl Middleware + 'static) -> Self {
         self.middlewares.push(Box::new(middleware));
         self
     }
 
+    /// Sends the request through the middleware chain.
     pub async fn send(&self, request: HttpRequest) -> Result<HttpResponse> {
         if self.middlewares.is_empty() {
             return self.http.send(request).await;
@@ -50,6 +58,7 @@ impl MiddlewareChain {
     }
 }
 
+/// Middleware that signs requests using the configured OSS signer and credentials.
 pub struct SigningMiddleware {
     signer: Arc<dyn crate::signer::Signer>,
     credentials: Arc<dyn crate::config::credentials::CredentialsProvider>,
@@ -57,6 +66,7 @@ pub struct SigningMiddleware {
 }
 
 impl SigningMiddleware {
+    /// Creates a new `SigningMiddleware`.
     pub fn new(
         signer: Arc<dyn crate::signer::Signer>,
         credentials: Arc<dyn crate::config::credentials::CredentialsProvider>,
@@ -134,11 +144,13 @@ pub(crate) fn extract_path(uri: &str) -> String {
     "/".to_string()
 }
 
+/// Middleware that sets the User-Agent header on outgoing requests.
 pub struct UserAgentMiddleware {
     user_agent: String,
 }
 
 impl UserAgentMiddleware {
+    /// Creates a new `UserAgentMiddleware` with the given user agent string.
     pub fn new(user_agent: impl Into<String>) -> Self {
         Self {
             user_agent: user_agent.into(),
@@ -162,6 +174,7 @@ impl Middleware for UserAgentMiddleware {
     }
 }
 
+/// Configuration for retry behavior.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
     pub max_retries: u32,
@@ -180,20 +193,24 @@ impl Default for RetryConfig {
 }
 
 impl RetryConfig {
+    /// Creates a new `RetryConfig` with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the maximum number of retries.
     pub fn with_max_retries(mut self, max: u32) -> Self {
         self.max_retries = max;
         self
     }
 
+    /// Sets the base delay between retries.
     pub fn with_base_delay(mut self, delay: Duration) -> Self {
         self.base_delay = delay;
         self
     }
 
+    /// Sets the maximum backoff duration.
     pub fn with_max_backoff(mut self, backoff: Duration) -> Self {
         self.max_backoff = backoff;
         self

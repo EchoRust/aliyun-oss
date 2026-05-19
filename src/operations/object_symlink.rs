@@ -1,3 +1,5 @@
+//! Symbolic link operations.
+
 use std::sync::Arc;
 
 use serde::Deserialize;
