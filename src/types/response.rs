@@ -271,6 +271,21 @@ pub struct GetBucketStatOutput {
     pub deep_cold_archive_object_count: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename = "AccessControlPolicy")]
+pub struct GetObjectAclOutput {
+    #[serde(rename = "Owner")]
+    pub owner: OwnerInfo,
+    #[serde(rename = "AccessControlList")]
+    pub acl: AccessControlPolicyDetail,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct AccessControlPolicyDetail {
+    #[serde(rename = "Grant")]
+    pub grant: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
