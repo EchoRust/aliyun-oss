@@ -531,6 +531,20 @@ impl BucketOperations {
     pub fn list_object_versions(&self) -> ListObjectVersionsBuilder {
         ListObjectVersionsBuilder::new(self.client_inner().clone(), self.bucket_name().clone())
     }
+
+    pub fn process_object(
+        &self,
+        key: impl Into<String>,
+        style: impl Into<String>,
+    ) -> Result<GetObjectBuilder> {
+        let object_key = ObjectKey::new(key.into())?;
+        Ok(GetObjectBuilder::new(
+            self.client_inner().clone(),
+            self.bucket_name().clone(),
+            object_key,
+        )
+        .process(style))
+    }
 }
 
 pub struct GetObjectBuilder {

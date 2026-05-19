@@ -22,4 +22,5 @@ pub mod object_copy;
 pub mod object_multipart;
 pub mod object_restore;
 pub mod object_symlink;
+pub mod object_tagging;
 pub mod service;
