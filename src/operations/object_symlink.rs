@@ -397,7 +397,7 @@ mod tests {
             .await
             .unwrap();
         let o = b
-            .put_symlink(&format!("link-{}", chrono::Utc::now().timestamp()), &key)
+            .put_symlink(format!("link-{}", chrono::Utc::now().timestamp()), &key)
             .unwrap()
             .send()
             .await
