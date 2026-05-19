@@ -245,6 +245,26 @@ impl CredentialsChain {
     pub fn new(providers: Vec<Box<dyn CredentialsProvider>>) -> Self {
         Self { providers }
     }
+
+    pub fn builder() -> CredentialsChainBuilder {
+        CredentialsChainBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct CredentialsChainBuilder {
+    providers: Vec<Box<dyn CredentialsProvider>>,
+}
+
+impl CredentialsChainBuilder {
+    pub fn with(mut self, provider: impl CredentialsProvider + 'static) -> Self {
+        self.providers.push(Box::new(provider));
+        self
+    }
+
+    pub fn build(self) -> CredentialsChain {
+        CredentialsChain::new(self.providers)
+    }
 }
 
 #[async_trait]
